@@ -1,0 +1,70 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sentinel
+    ports:
+      - "5432:5432"
+    volumes:
+      - sentinel_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./apps/backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      APP_NAME: sentinel-backend
+      ENV: docker
+      DEBUG: "false"
+      SECRET_KEY: ${SECRET_KEY:-change_me_use_long_random_secret_in_production}
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/sentinel
+      REDIS_URL: redis://redis:6379/0
+      # Optional at compose parse time so `docker compose up -d postgres redis` works without a root .env.
+      # Set GROQ_API_KEY in a root `.env` file (or export it) when you start the `backend` service.
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173
+      WS_ORIGIN: http://localhost:5173
+      SIMULATION_TICK_SECONDS: "5"
+      SIMULATED_MINUTES_PER_TICK: "15"
+      TEMPERATURE_THRESHOLD_F: "36"
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:8000
+        VITE_WS_URL: ws://localhost:8000/ws/dashboard
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  sentinel_pg:

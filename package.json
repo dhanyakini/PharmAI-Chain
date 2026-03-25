@@ -1,0 +1,9 @@
+{
+  "name": "sentinel-monorepo",
+  "private": true,
+  "scripts": {
+    "dev:frontend": "pnpm --filter sentinel-frontend dev",
+    "build:frontend": "pnpm --filter sentinel-frontend build",
+    "lint:frontend": "pnpm --filter sentinel-frontend lint"
+  }
+}
