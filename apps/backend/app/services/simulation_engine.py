@@ -30,7 +30,10 @@ from app.database.session import get_session_factory
 from app.services.pubsub_service import CHANNEL_LIFECYCLE, CHANNEL_TELEMETRY, RedisPubSub, get_redis_client
 from app.services.thermal_model import update_internal_temp_f
 from app.services.routing_service import route_truck_to_reroute_target
-from app.services.warehouse_service import pick_nearest_cold_storage_warehouse
+from app.services.warehouse_service import (
+    nullify_warehouse_if_final_is_as_close_or_closer,
+    pick_nearest_cold_storage_warehouse,
+)
 from app.services.weather_service import resolve_weather_for_simulation
 
 
@@ -529,6 +532,13 @@ async def _simulation_loop(shipment_id: int) -> None:
                                 lat=float(runtime.truck_lat),
                                 lng=float(runtime.truck_lng),
                             )
+                            wh_blizz = nullify_warehouse_if_final_is_as_close_or_closer(
+                                truck_lat=float(runtime.truck_lat),
+                                truck_lng=float(runtime.truck_lng),
+                                final_lat=float(shipment.destination_lat),
+                                final_lng=float(shipment.destination_lng),
+                                warehouse=wh_blizz,
+                            )
                             preview_payload: dict[str, Any] = {}
                             try:
                                 alt = await route_truck_to_reroute_target(
@@ -553,7 +563,14 @@ async def _simulation_loop(shipment_id: int) -> None:
                                 "reroute_suggested": True,
                                 "confidence_score": None,
                                 "warehouse_candidate": wh_blizz,
-                                "decision_reason": "Blizzard detected on active route. Confirm reroute to continue safely.",
+                                "decision_reason": (
+                                    "Blizzard detected on active route. Confirm reroute to continue safely."
+                                    if wh_blizz
+                                    else (
+                                        "Blizzard detected. Original destination is as close or closer than staging; "
+                                        "confirm continuing toward scheduled delivery."
+                                    )
+                                ),
                                 "reasoning_trace": "Simulation paused for mandatory user reroute confirmation.",
                                 "trigger_reason": "blizzard_detected",
                                 **preview_payload,
@@ -624,6 +641,7 @@ async def _simulation_loop(shipment_id: int) -> None:
                             payload={
                                 "weather_state": weather_state,
                                 "internal_temp_f": runtime.internal_temp_f,
+                                "external_temp_f": external_temp_f,
                                 "risk_level": risk_level,
                                 "decision_reason": env_reason,
                             },
@@ -639,22 +657,8 @@ async def _simulation_loop(shipment_id: int) -> None:
                                 "weather_state": weather_state,
                                 "risk_level": risk_level,
                                 "internal_temp_f": runtime.internal_temp_f,
+                                "external_temp_f": external_temp_f,
                             },
-                        )
-                        await _persist_lifecycle_event(
-                            session=session,
-                            redis_pubsub=pubsub,
-                            shipment_id=shipment_id,
-                            event_name="dispatcher_agent_called",
-                            payload={},
-                        )
-                        await _persist_intervention_log(
-                            session=session,
-                            shipment_id=shipment_id,
-                            agent_role="dispatcher_agent",
-                            trigger_reason="environment_agent_triggered",
-                            reasoning_trace="Dispatcher agent evaluating reroute and warehouse options.",
-                            action_taken="warehouse_search_and_route_review",
                         )
 
                         try:
@@ -671,6 +675,48 @@ async def _simulation_loop(shipment_id: int) -> None:
                                 risk_level=risk_level,
                             )
 
+                            staging_opts = suggestion.get("staging_options") or []
+                            top_wh = staging_opts[0] if staging_opts else None
+                            await _persist_lifecycle_event(
+                                session=session,
+                                redis_pubsub=pubsub,
+                                shipment_id=shipment_id,
+                                event_name="staging_warehouse_agent_called",
+                                payload={
+                                    "candidate_count": len(staging_opts),
+                                    "top_warehouse_name": top_wh.get("name") if isinstance(top_wh, dict) else None,
+                                },
+                            )
+                            await _persist_intervention_log(
+                                session=session,
+                                shipment_id=shipment_id,
+                                agent_role="staging_warehouse_agent",
+                                trigger_reason="environment_assessment_completed",
+                                reasoning_trace=f"Ranked {len(staging_opts)} cold-storage staging candidate(s).",
+                                action_taken="warehouse_candidates_ranked",
+                                raw_model_output_json={"staging_options": staging_opts},
+                            )
+
+                            nav_opts = suggestion.get("navigation_options") or []
+                            await _persist_lifecycle_event(
+                                session=session,
+                                redis_pubsub=pubsub,
+                                shipment_id=shipment_id,
+                                event_name="navigation_agent_called",
+                                payload={
+                                    "legs_resolved": len(nav_opts),
+                                },
+                            )
+                            await _persist_intervention_log(
+                                session=session,
+                                shipment_id=shipment_id,
+                                agent_role="navigation_agent",
+                                trigger_reason="staging_options_available",
+                                reasoning_trace="Resolved OSRM (or fallback) legs from truck to each staging option and final destination.",
+                                action_taken="route_legs_evaluated",
+                                raw_model_output_json={"navigation_options": nav_opts},
+                            )
+
                             await _persist_lifecycle_event(
                                 session=session,
                                 redis_pubsub=pubsub,
@@ -684,6 +730,9 @@ async def _simulation_loop(shipment_id: int) -> None:
                                     "reasoning_trace": suggestion.get("reasoning_trace"),
                                     "llm_prompt": suggestion.get("llm_prompt"),
                                     "llm_response": suggestion.get("llm_response"),
+                                    "environment_assessment": suggestion.get("environment_assessment"),
+                                    "staging_options": staging_opts,
+                                    "navigation_options": nav_opts,
                                 },
                             )
                             await _persist_intervention_log(
@@ -710,6 +759,9 @@ async def _simulation_loop(shipment_id: int) -> None:
                                     "decision_reason": suggestion.get("decision_reason"),
                                     "llm_prompt": suggestion.get("llm_prompt"),
                                     "llm_response": suggestion.get("llm_response"),
+                                    "environment_assessment": suggestion.get("environment_assessment"),
+                                    "staging_options": staging_opts,
+                                    "navigation_options": nav_opts,
                                 },
                             )
 
@@ -811,6 +863,13 @@ async def _simulation_loop(shipment_id: int) -> None:
                                     session,
                                     lat=float(runtime.truck_lat),
                                     lng=float(runtime.truck_lng),
+                                )
+                                wh_fallback = nullify_warehouse_if_final_is_as_close_or_closer(
+                                    truck_lat=float(runtime.truck_lat),
+                                    truck_lng=float(runtime.truck_lng),
+                                    final_lat=float(shipment.destination_lat),
+                                    final_lng=float(shipment.destination_lng),
+                                    warehouse=wh_fallback,
                                 )
                                 preview_payload: dict[str, Any] = {}
                                 try:

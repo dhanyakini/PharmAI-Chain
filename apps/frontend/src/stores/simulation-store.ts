@@ -86,6 +86,10 @@ function eventToTimelineEntry(envelope: DashboardWsEnvelope): LifecycleEntry | n
       ? "environment_agent"
       : eventName === "dispatcher_agent_called"
         ? "dispatcher_agent"
+      : eventName === "staging_warehouse_agent_called"
+        ? "staging_warehouse_agent"
+      : eventName === "navigation_agent_called"
+        ? "navigation_agent"
         : eventName === "supervisor_decision_selected"
           ? "supervisor_agent"
           : eventName === "reroute_suggested" || eventName === "reroute_confirmed" || eventName === "reroute_applied"
@@ -114,6 +118,21 @@ function eventToTimelineEntry(envelope: DashboardWsEnvelope): LifecycleEntry | n
         : "Temperature recovered.";
   } else if (eventName === "dispatcher_agent_called") {
     description = "Dispatcher agent searching cold-storage warehouse candidates.";
+  } else if (eventName === "staging_warehouse_agent_called") {
+    const n = typeof payload.candidate_count === "number" ? payload.candidate_count : null;
+    const top = typeof payload.top_warehouse_name === "string" ? payload.top_warehouse_name : null;
+    description = [
+      n !== null ? `Ranked ${n} cold-storage staging candidate(s).` : "Ranked cold-storage staging candidates.",
+      top ? `Nearest: ${top}` : null,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  } else if (eventName === "navigation_agent_called") {
+    const legs = typeof payload.legs_resolved === "number" ? payload.legs_resolved : null;
+    description =
+      legs !== null
+        ? `Navigation resolved ${legs} driving leg(s) (staging + final) via OSRM or fallback.`
+        : "Navigation evaluated driving legs to staging and final destination.";
   } else if (eventName === "supervisor_decision_selected") {
     const confidence =
       typeof payload.confidence_score === "number" ? `Confidence ${(payload.confidence_score * 100).toFixed(0)}%` : null;

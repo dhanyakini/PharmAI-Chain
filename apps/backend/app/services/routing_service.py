@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import httpx
@@ -90,4 +91,95 @@ async def route_truck_to_reroute_target(
         destination_lat=dest_lat,
         destination_lng=dest_lng,
     )
+
+
+async def _safe_osrm_leg(
+    *,
+    truck_lat: float,
+    truck_lng: float,
+    dest_lat: float,
+    dest_lng: float,
+) -> dict[str, Any] | None:
+    try:
+        return await generate_route_polyline(
+            origin_lat=truck_lat,
+            origin_lng=truck_lng,
+            destination_lat=dest_lat,
+            destination_lng=dest_lng,
+        )
+    except Exception:
+        return None
+
+
+def _haversine_eta_fallback_km(*, straight_line_km: float) -> tuple[float, float]:
+    """Rough road distance and ETA when OSRM is unavailable (assumes ~1.25x bee-line, 45 km/h)."""
+    dist_km = straight_line_km * 1.25
+    eta_minutes = (dist_km / 45.0) * 60.0
+    return dist_km, eta_minutes
+
+
+async def route_legs_parallel_from_truck(
+    *,
+    truck_lat: float,
+    truck_lng: float,
+    legs: list[tuple[str, str, dict[str, Any] | None, float, float]],
+) -> list[dict[str, Any]]:
+    """Resolve several truck→destination legs in parallel for the navigation agent.
+
+    Each leg is ``(leg_key, target, warehouse_dict_or_none, dest_lat, dest_lng)`` where
+    ``target`` is ``\"warehouse\"`` or ``\"final\"``.
+    """
+    if not legs:
+        return []
+
+    async def one(
+        leg_key: str,
+        target: str,
+        wh: dict[str, Any] | None,
+        dest_lat: float,
+        dest_lng: float,
+    ) -> dict[str, Any]:
+        straight = (
+            ((wh or {}).get("straight_line_km"))
+            if isinstance((wh or {}).get("straight_line_km"), (int, float))
+            else None
+        )
+        osrm = await _safe_osrm_leg(
+            truck_lat=truck_lat,
+            truck_lng=truck_lng,
+            dest_lat=dest_lat,
+            dest_lng=dest_lng,
+        )
+        if osrm is not None:
+            return {
+                "leg_key": leg_key,
+                "target": target,
+                "warehouse": wh,
+                "distance_km": float(osrm["distance_km"]),
+                "eta_minutes": float(osrm["eta_minutes"]),
+                "routing_source": "osrm",
+            }
+        # Fallback using straight-line from staging option when present
+        if straight is not None:
+            dist_km, eta_min = _haversine_eta_fallback_km(straight_line_km=float(straight))
+        else:
+            # Minimal bee-line from truck to dest
+            from app.services.warehouse_service import haversine_km
+
+            sl = haversine_km(truck_lat, truck_lng, dest_lat, dest_lng)
+            dist_km, eta_min = _haversine_eta_fallback_km(straight_line_km=sl)
+        return {
+            "leg_key": leg_key,
+            "target": target,
+            "warehouse": wh,
+            "distance_km": float(dist_km),
+            "eta_minutes": float(eta_min),
+            "routing_source": "haversine_estimate",
+        }
+
+    tasks = [
+        one(leg_key, target, wh, dlat, dlng)
+        for leg_key, target, wh, dlat, dlng in legs
+    ]
+    return list(await asyncio.gather(*tasks))
 
