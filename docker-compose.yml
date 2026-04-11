@@ -42,6 +42,8 @@ services:
       # Set GROQ_API_KEY in a root `.env` file (or export it) when you start the `backend` service.
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+      # Optional: real ambient temp at truck location (https://openweathermap.org/api)
+      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY:-}
       CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173
       WS_ORIGIN: http://localhost:5173
       SIMULATION_TICK_SECONDS: "5"

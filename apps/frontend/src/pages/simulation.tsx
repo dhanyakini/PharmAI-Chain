@@ -14,6 +14,7 @@ type RoutePolyline = number[][];
 type LiveSimulationState = {
   shipment_id: number;
   running: boolean;
+  blizzard_scenario_id?: number | null;
   state: any;
   origin: { lat: number; lng: number };
   destination: { lat: number; lng: number };
@@ -23,6 +24,15 @@ type LiveSimulationState = {
   remaining_polyline?: RoutePolyline | null;
   paused_for_reroute_confirmation?: boolean;
   pending_reroute?: any | null;
+};
+
+type BlizzardScenarioOption = {
+  id: number;
+  slug: string;
+  name: string;
+  weather_state: string;
+  external_temp_f: number;
+  risk_level: number;
 };
 
 export default function SimulationPage() {
@@ -37,6 +47,8 @@ export default function SimulationPage() {
   const [stopBusy, setStopBusy] = React.useState(false);
   const [startRequested, setStartRequested] = React.useState(false);
   const [stopRequested, setStopRequested] = React.useState(false);
+  const [blizzardOptions, setBlizzardOptions] = React.useState<BlizzardScenarioOption[]>([]);
+  const [selectedBlizzardId, setSelectedBlizzardId] = React.useState<string>("");
 
   const telemetry = useSimulationStore((s) => s.telemetry);
   const activitySteps = useSimulationStore((s) => s.activitySteps);
@@ -61,6 +73,7 @@ export default function SimulationPage() {
         speed: state.truck.speed_kmh,
         weather_state: state.weather?.weather_state,
         risk_level: state.weather?.risk_level,
+        external_temp: state.weather?.external_temp_f,
       });
     }
     setRerouteSuggestion(res.data.pending_reroute ?? null);
@@ -102,6 +115,21 @@ export default function SimulationPage() {
   }, [shipmentId]);
 
   React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await api.get<BlizzardScenarioOption[]>("/simulation/blizzard-scenarios");
+        if (!cancelled) setBlizzardOptions(res.data);
+      } catch {
+        if (!cancelled) setBlizzardOptions([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  React.useEffect(() => {
     if (!sim?.running) return;
     const t = window.setInterval(() => {
       void refreshState().catch(() => {});
@@ -137,8 +165,16 @@ export default function SimulationPage() {
     setStartRequested(true);
     setStopRequested(false);
     try {
-      await api.post(`/simulation/start/${shipmentId}`);
-      setMsg("Simulation started.");
+      const q =
+        selectedBlizzardId !== ""
+          ? `?blizzard_scenario_id=${encodeURIComponent(selectedBlizzardId)}`
+          : "";
+      await api.post(`/simulation/start/${shipmentId}${q}`);
+      setMsg(
+        selectedBlizzardId !== ""
+          ? "Simulation started with injected blizzard scenario."
+          : "Simulation started (live weather / API fallback).",
+      );
       await refreshState().catch(() => {});
     } catch (e: any) {
       setMsg(e?.response?.data?.detail ?? "Failed to start simulation");
@@ -203,7 +239,27 @@ export default function SimulationPage() {
             <div className="text-sm text-muted-foreground">Shipment</div>
             <div className="text-lg font-semibold">#{sim.shipment_id}</div>
           </div>
-          <div className="flex gap-2 flex-wrap justify-end">
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex flex-wrap items-center gap-2 justify-end text-sm">
+              <label htmlFor="blizzard-scenario" className="text-muted-foreground whitespace-nowrap">
+                Weather mode
+              </label>
+              <select
+                id="blizzard-scenario"
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm max-w-[min(100%,280px)]"
+                value={selectedBlizzardId}
+                onChange={(e) => setSelectedBlizzardId(e.target.value)}
+                disabled={effectiveRunning || startBusy || stopBusy}
+              >
+                <option value="">Live (OpenWeather or fallback)</option>
+                {blizzardOptions.map((b) => (
+                  <option key={b.id} value={String(b.id)}>
+                    {b.name} ({b.weather_state}, {b.external_temp_f}°F)
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-2 flex-wrap justify-end">
             <Button onClick={() => void onStart()} disabled={effectiveRunning || startBusy || stopBusy}>
               Start
             </Button>
@@ -224,6 +280,7 @@ export default function SimulationPage() {
             <Button variant="outline" onClick={() => void onSaveSimulation()} disabled={startBusy || stopBusy}>
               Save Simulation
             </Button>
+            </div>
           </div>
         </div>
 

@@ -31,14 +31,37 @@ type Props = {
   telemetry?: Telemetry | null;
 };
 
-// Keep in sync with backend `CONNECTICUT_BLIZZARD_ZONE` rectangle (approx).
-const CONNECTICUT_BLIZZARD_ZONE: [number, number][] = [
-  [41.0, -73.7],
-  [41.0, -71.8],
-  [42.1, -71.8],
-  [42.1, -73.7],
-  [41.0, -73.7],
-];
+/** Project (lat,lng) onto the polyline for stable on-road marker placement. */
+function closestPointOnPolyline(polyline: number[][], lat: number, lng: number): [number, number] {
+  if (polyline.length === 0) return [lat, lng];
+  if (polyline.length === 1) return [polyline[0][0], polyline[0][1]];
+
+  let bestLat = polyline[0][0];
+  let bestLng = polyline[0][1];
+  let best = Number.POSITIVE_INFINITY;
+
+  for (let i = 0; i < polyline.length - 1; i += 1) {
+    const la0 = polyline[i][0];
+    const ln0 = polyline[i][1];
+    const la1 = polyline[i + 1][0];
+    const ln1 = polyline[i + 1][1];
+    const dLat = la1 - la0;
+    const dLng = ln1 - ln0;
+    const len2 = dLat * dLat + dLng * dLng;
+    if (len2 < 1e-18) continue;
+    let t = ((lat - la0) * dLat + (lng - ln0) * dLng) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const pl = la0 + t * dLat;
+    const pLng = ln0 + t * dLng;
+    const dist = (pl - lat) * (pl - lat) + (pLng - lng) * (pLng - lng);
+    if (dist < best) {
+      best = dist;
+      bestLat = pl;
+      bestLng = pLng;
+    }
+  }
+  return [bestLat, bestLng];
+}
 
 function closestPointIndex(polyline: number[][], lat: number, lng: number) {
   let bestIdx = 0;
@@ -82,10 +105,9 @@ export default function SimulationMap({
 
   const originMarkerRef = React.useRef<maplibregl.Marker | null>(null);
   const destinationMarkerRef = React.useRef<maplibregl.Marker | null>(null);
-  const warehouseLayerAddedRef = React.useRef(false);
-
   const truckMarkerRef = React.useRef<maplibregl.Marker | null>(null);
-  const truckElRef = React.useRef<HTMLDivElement | null>(null);
+  /** Inner triangle only — MapLibre must own `transform` on the marker root for pan/zoom. */
+  const truckRotateElRef = React.useRef<HTMLDivElement | null>(null);
   const renderedRef = React.useRef<{ lat: number; lng: number; heading: number } | null>(null);
   const animRafRef = React.useRef<number | null>(null);
 
@@ -122,18 +144,6 @@ export default function SimulationMap({
     });
   }
 
-  function removeLayerIfExists(layerId: string) {
-    const map = mapRef.current;
-    if (!map) return;
-    if (map.getLayer(layerId)) map.removeLayer(layerId);
-  }
-
-  function removeSourceIfExists(sourceId: string) {
-    const map = mapRef.current;
-    if (!map) return;
-    if (map.getSource(sourceId)) map.removeSource(sourceId);
-  }
-
   React.useEffect(() => {
     if (!mapEl.current) return;
 
@@ -147,18 +157,27 @@ export default function SimulationMap({
 
     mapRef.current = map;
 
-    // Create truck marker element.
-    const truckEl = document.createElement("div");
-    truckEl.style.width = "22px";
-    truckEl.style.height = "22px";
-    truckEl.style.background = "#1d4ed8";
-    truckEl.style.clipPath = "polygon(50% 0%, 0% 100%, 100% 100%)";
-    truckEl.style.transformOrigin = "50% 60%";
-    truckEl.style.boxShadow = "0 8px 20px rgba(0,0,0,0.25)";
-    truckEl.className = "truck-marker";
-    truckElRef.current = truckEl;
+    // Root: MapLibre sets translate/scale on this for geographic anchoring — do not set transform on it.
+    const truckRoot = document.createElement("div");
+    truckRoot.style.width = "28px";
+    truckRoot.style.height = "28px";
+    truckRoot.style.display = "flex";
+    truckRoot.style.alignItems = "center";
+    truckRoot.style.justifyContent = "center";
+    truckRoot.style.pointerEvents = "none";
 
-    const truckMarker = new maplibregl.Marker({ element: truckEl, draggable: false })
+    const truckInner = document.createElement("div");
+    truckInner.style.width = "22px";
+    truckInner.style.height = "22px";
+    truckInner.style.background = "#1d4ed8";
+    truckInner.style.clipPath = "polygon(50% 0%, 0% 100%, 100% 100%)";
+    truckInner.style.transformOrigin = "50% 60%";
+    truckInner.style.boxShadow = "0 8px 20px rgba(0,0,0,0.25)";
+    truckInner.className = "truck-marker-inner";
+    truckRoot.appendChild(truckInner);
+    truckRotateElRef.current = truckInner;
+
+    const truckMarker = new maplibregl.Marker({ element: truckRoot, anchor: "center", draggable: false })
       .setLngLat([origin.lng, origin.lat])
       .addTo(map);
     truckMarkerRef.current = truckMarker;
@@ -173,32 +192,6 @@ export default function SimulationMap({
       .addTo(map);
 
     map.on("load", () => {
-      // Storm zone polygon overlay (toggle based on telemetry in a later effect).
-      const polygon: any = {
-        type: "Feature",
-        geometry: {
-          type: "Polygon",
-          coordinates: [
-            CONNECTICUT_BLIZZARD_ZONE.map(([lat, lng]) => [lng, lat]),
-          ],
-        },
-      };
-
-      if (!map.getSource("blizzard-zone")) {
-        map.addSource("blizzard-zone", { type: "geojson", data: polygon });
-      }
-      if (!map.getLayer("blizzard-zone-fill")) {
-        map.addLayer({
-          id: "blizzard-zone-fill",
-          type: "fill",
-          source: "blizzard-zone",
-          paint: {
-            "fill-color": "rgba(147, 197, 253, 0.25)",
-            "fill-outline-color": "rgba(59, 130, 246, 0.6)",
-          },
-        });
-      }
-
       setStyleReady(true);
     });
 
@@ -229,18 +222,7 @@ export default function SimulationMap({
   React.useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    // Toggle storm polygon visibility based on telemetry weather state.
-    if (map.getLayer("blizzard-zone-fill")) {
-      const inStorm = telemetry?.weather_state === "blizzard";
-      map.setLayoutProperty("blizzard-zone-fill", "visibility", inStorm ? "visible" : "none");
-    }
-  }, [telemetry?.weather_state]);
-
-  React.useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
     if (!styleReady) return;
-    if (warehouseLayerAddedRef.current) return;
     if (!warehouses.length) return;
 
     const features = warehouses.map((w) => ({
@@ -250,6 +232,13 @@ export default function SimulationMap({
     }));
 
     const geojson = { type: "FeatureCollection", features } as const;
+
+    const existing = map.getSource("warehouses") as maplibregl.GeoJSONSource | undefined;
+    if (existing) {
+      existing.setData(geojson);
+      return;
+    }
+
     map.addSource("warehouses", { type: "geojson", data: geojson });
     map.addLayer({
       id: "warehouses-layer",
@@ -263,15 +252,28 @@ export default function SimulationMap({
         "circle-stroke-width": 2,
       },
     });
-    warehouseLayerAddedRef.current = true;
   }, [styleReady, warehouses]);
 
   React.useEffect(() => {
-    if (!telemetry || !truckMarkerRef.current || !truckElRef.current) return;
-    const targetLat = telemetry.lat;
-    const targetLng = telemetry.lng;
+    if (!telemetry || !truckMarkerRef.current || !truckRotateElRef.current) return;
+    let targetLat = telemetry.lat;
+    let targetLng = telemetry.lng;
     // Prevent "random jumps" if websocket payload is temporarily incomplete.
     if (!Number.isFinite(targetLat) || !Number.isFinite(targetLng)) return;
+
+    const routeForSnap =
+      remainingPolyline && remainingPolyline.length >= 2
+        ? remainingPolyline
+        : currentRoutePolyline && currentRoutePolyline.length >= 2
+          ? currentRoutePolyline
+          : defaultRoutePolyline && defaultRoutePolyline.length >= 2
+            ? defaultRoutePolyline
+            : null;
+    if (routeForSnap) {
+      const [sl, sg] = closestPointOnPolyline(routeForSnap, targetLat, targetLng);
+      targetLat = sl;
+      targetLng = sg;
+    }
     const targetHeading = Number.isFinite(telemetry.heading) ? telemetry.heading : 0;
     const from = renderedRef.current ?? { lat: targetLat, lng: targetLng, heading: targetHeading };
     if (!Number.isFinite(from.lat) || !Number.isFinite(from.lng)) return;
@@ -289,7 +291,7 @@ export default function SimulationMap({
       const heading = lerpHeading(fromHeading, targetHeading, t);
 
       truckMarkerRef.current?.setLngLat([lng, lat]);
-      truckElRef.current!.style.transform = `rotate(${heading}deg)`;
+      truckRotateElRef.current!.style.transform = `rotate(${heading}deg)`;
       renderedRef.current = { lat, lng, heading };
 
       if (t < 1) {
@@ -298,7 +300,14 @@ export default function SimulationMap({
     };
 
     animRafRef.current = requestAnimationFrame(tick);
-  }, [telemetry?.lat, telemetry?.lng, telemetry?.heading]);
+  }, [
+    telemetry?.lat,
+    telemetry?.lng,
+    telemetry?.heading,
+    remainingPolyline,
+    currentRoutePolyline,
+    defaultRoutePolyline,
+  ]);
 
   // Keep the "remaining route" highlight aligned with current telemetry position.
   React.useEffect(() => {

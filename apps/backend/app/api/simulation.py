@@ -6,13 +6,14 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db_session, require_admin
 from app.database.models import (
+    BlizzardScenario,
     InterventionLog,
     LifecycleEventLog,
     RouteHistory,
@@ -24,7 +25,7 @@ from app.database.models import (
 )
 from app.services.lifecycle_service import emit_lifecycle_event
 from app.services.pubsub_service import get_redis_client
-from app.services.routing_service import generate_route_polyline
+from app.services.routing_service import route_truck_to_reroute_target
 from app.services.simulation_engine import (
     apply_reroute_to_running_shipment,
     simulation_task_registry,
@@ -39,6 +40,21 @@ router = APIRouter(prefix="/simulation", tags=["simulation"])
 class SimulationActionResponse(BaseModel):
     shipment_id: int
     status: str
+
+
+class BlizzardScenarioResponse(BaseModel):
+    id: int
+    slug: str
+    name: str
+    external_temp_f: float
+    wind_speed_mph: float | None
+    visibility_miles: float | None
+    precip_type: str
+    weather_state: str
+    risk_level: float
+    synopsis: str | None
+
+    model_config = {"from_attributes": True}
 
 
 def _timeline_entry_from_event(row: LifecycleEventLog) -> dict[str, Any]:
@@ -69,13 +85,27 @@ def _timeline_entry_from_event(row: LifecycleEventLog) -> dict[str, Any]:
     }
 
 
+@router.get("/blizzard-scenarios", response_model=list[BlizzardScenarioResponse])
+async def list_blizzard_scenarios(
+    _: Any = Depends(require_admin),
+    session: AsyncSession = Depends(get_db_session),
+) -> list[BlizzardScenarioResponse]:
+    q = await session.execute(select(BlizzardScenario).order_by(BlizzardScenario.id.asc()))
+    rows = q.scalars().all()
+    return [BlizzardScenarioResponse.model_validate(r) for r in rows]
+
+
 @router.post("/start/{shipment_id}", response_model=SimulationActionResponse)
 async def start_simulation(
     shipment_id: int,
+    blizzard_scenario_id: int | None = Query(
+        default=None,
+        description="Optional blizzard_scenarios.id — injects DB scenario (summer demos). Omit for live OpenWeather.",
+    ),
     _: Any = Depends(require_admin),
 ) -> SimulationActionResponse:
     try:
-        await start_simulation_worker(shipment_id)
+        await start_simulation_worker(shipment_id, blizzard_scenario_id=blizzard_scenario_id)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     return SimulationActionResponse(shipment_id=shipment_id, status="started")
@@ -112,29 +142,19 @@ async def confirm_reroute(
     if shipment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shipment not found")
 
-    await emit_lifecycle_event(
-        shipment_id=shipment_id,
-        event_name="reroute_confirmed",
-        payload={"warehouse_candidate": runtime.pending_reroute.get("warehouse_candidate")},
-    )
-
     try:
-        preview_polyline = runtime.pending_reroute.get("proposed_remaining_polyline")
-        if isinstance(preview_polyline, list) and preview_polyline:
-            remaining_polyline = [[float(p[0]), float(p[1])] for p in preview_polyline]
-            alt = {
-                "distance_km": runtime.pending_reroute.get("proposed_distance_km"),
-                "eta_minutes": runtime.pending_reroute.get("proposed_eta_minutes"),
-            }
-        else:
-            # Alternate route only for remaining path: current -> final destination.
-            alt = await generate_route_polyline(
-                origin_lat=current_lat,
-                origin_lng=current_lng,
-                destination_lat=float(shipment.destination_lat),
-                destination_lng=float(shipment.destination_lng),
-            )
-            remaining_polyline = alt["polyline"]
+        wh = runtime.pending_reroute.get("warehouse_candidate")
+        wh_dict = wh if isinstance(wh, dict) else None
+        # Always resolve at confirm time: truck -> warehouse (if suggested) else -> final destination.
+        # Do not reuse proposed_remaining_polyline — it historically pointed at final dest only.
+        alt = await route_truck_to_reroute_target(
+            truck_lat=current_lat,
+            truck_lng=current_lng,
+            final_destination_lat=float(shipment.destination_lat),
+            final_destination_lng=float(shipment.destination_lng),
+            warehouse_candidate=wh_dict,
+        )
+        remaining_polyline = alt["polyline"]
         if not remaining_polyline:
             raise RuntimeError("Alternate route empty")
         remaining_polyline[0] = [current_lat, current_lng]
@@ -149,23 +169,30 @@ async def confirm_reroute(
             prefix[-1] = [current_lat, current_lng]
         full_polyline = prefix + remaining_polyline[1:]
 
-        # Persist new route + update shipment status atomically.
-        async with session.begin():
-            shipment.status = ShipmentStatus.rerouted
-            shipment.current_lat = current_lat
-            shipment.current_lng = current_lng
-            session.add(shipment)
+        # Persist new route + shipment (same request session already has implicit txn from SELECT).
+        # Do not use session.begin() here — it conflicts with autobegin after execute().
+        shipment.status = ShipmentStatus.rerouted
+        shipment.current_lat = current_lat
+        shipment.current_lng = current_lng
+        session.add(shipment)
 
-            rh = RouteHistory(
-                shipment_id=shipment_id,
-                timestamp=utcnow(),
-                route_name="reroute_applied",
-                reason="user_confirmed",
-                polyline_json=full_polyline,
-                distance_km=alt["distance_km"],
-                eta_minutes=alt["eta_minutes"],
-            )
-            session.add(rh)
+        rh = RouteHistory(
+            shipment_id=shipment_id,
+            timestamp=utcnow(),
+            route_name="reroute_applied",
+            reason="user_confirmed_to_warehouse" if wh_dict else "user_confirmed",
+            polyline_json=full_polyline,
+            distance_km=alt["distance_km"],
+            eta_minutes=alt["eta_minutes"],
+        )
+        session.add(rh)
+        await session.commit()
+
+        await emit_lifecycle_event(
+            shipment_id=shipment_id,
+            event_name="reroute_confirmed",
+            payload={"warehouse_candidate": runtime.pending_reroute.get("warehouse_candidate")},
+        )
 
         # Update running worker to continue from the current position (no teleporting).
         await apply_reroute_to_running_shipment(shipment_id, remaining_polyline)
@@ -188,7 +215,10 @@ async def confirm_reroute(
             event_name="simulation_resumed",
             payload={"reason": "reroute_confirmed"},
         )
+    except HTTPException:
+        raise
     except Exception as e:
+        await session.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
     return SimulationActionResponse(shipment_id=shipment_id, status="rerouted")
@@ -398,6 +428,7 @@ async def simulation_state(
         return {
             "shipment_id": shipment_id,
             "running": is_running,
+            "blizzard_scenario_id": runtime.blizzard_scenario_id if runtime is not None else None,
             "state": running_state if is_running else None,
             "paused_for_reroute_confirmation": bool(
                 runtime.paused_for_reroute_confirmation

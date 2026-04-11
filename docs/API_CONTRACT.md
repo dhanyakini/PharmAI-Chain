@@ -23,6 +23,15 @@ Admin-only: `POST /shipments`, `PATCH /shipments/{id}`.
 - `GET /dashboard/live-state`
 - `GET /dashboard/events?shipment_id=&hours=`
 
+## Simulation & weather
+
+- `GET /simulation/blizzard-scenarios` — list DB-backed synthetic blizzard profiles (admin).
+- `POST /simulation/start/{shipment_id}?blizzard_scenario_id=` — start worker; optional `blizzard_scenario_id` injects a scenario row instead of live API for that run.
+- `POST /simulation/stop/{shipment_id}`
+- `GET /simulation/state/{shipment_id}` — includes `blizzard_scenario_id` when set.
+
+Live ambient temperature uses **OpenWeather** when `OPENWEATHER_API_KEY` is set; otherwise a local fallback. Telemetry `raw_payload` may include `weather_source` (`openweather`, `openweather_cache`, `blizzard_scenario`, `fallback`).
+
 ## WebSocket
 
 - `WS /ws/dashboard` — unified envelope:

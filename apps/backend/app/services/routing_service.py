@@ -64,3 +64,30 @@ async def generate_route_polyline(
 
     raise RuntimeError(f"OSRM routing failed: {last_exc!r}") from last_exc
 
+
+async def route_truck_to_reroute_target(
+    *,
+    truck_lat: float,
+    truck_lng: float,
+    final_destination_lat: float,
+    final_destination_lng: float,
+    warehouse_candidate: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Drive OSRM from truck to staging warehouse when provided, else to final destination."""
+    if (
+        isinstance(warehouse_candidate, dict)
+        and warehouse_candidate.get("lat") is not None
+        and warehouse_candidate.get("lng") is not None
+    ):
+        dest_lat = float(warehouse_candidate["lat"])
+        dest_lng = float(warehouse_candidate["lng"])
+    else:
+        dest_lat = float(final_destination_lat)
+        dest_lng = float(final_destination_lng)
+    return await generate_route_polyline(
+        origin_lat=truck_lat,
+        origin_lng=truck_lng,
+        destination_lat=dest_lat,
+        destination_lng=dest_lng,
+    )
+

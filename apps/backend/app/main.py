@@ -25,9 +25,26 @@ from app.api.websocket import router as websocket_router
 from app.api.dashboard import router as dashboard_router
 from app.database.session import get_engine, get_session_factory, init_db, reset_db
 from app.services.pubsub_service import get_redis_client
-from app.database.seed import seed_admin_user
+from app.database.seed import seed_admin_user, seed_blizzard_scenarios, seed_warehouse_candidates
 
 log = logging.getLogger(__name__)
+
+
+def _db_connection_failed(exc: BaseException) -> bool:
+    if isinstance(exc, ConnectionRefusedError):
+        return True
+    msg = str(exc).lower()
+    if (
+        "connection refused" in msg
+        or "connect call failed" in msg
+        or "errno 61" in msg
+        or "could not connect" in msg
+    ):
+        return True
+    if exc.__cause__ is not None:
+        return _db_connection_failed(exc.__cause__)
+    return False
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -38,10 +55,20 @@ async def lifespan(app: FastAPI):
     # `apps/backend/.env` uses ENV=local; docker-compose sets ENV=docker.
     reset_for_rebuild = settings.env == "local"
 
-    if reset_for_rebuild:
-        await reset_db()
-    else:
-        await init_db()
+    try:
+        if reset_for_rebuild:
+            await reset_db()
+        else:
+            await init_db()
+    except Exception as e:
+        if _db_connection_failed(e):
+            log.critical(
+                "PostgreSQL is not reachable (check DATABASE_URL). "
+                "Host uvicorn needs DATABASE_URL with host localhost (not postgres). "
+                "If Docker shows only '5432/tcp' under PORTS (no 0.0.0.0:5432->5432), "
+                "recreate DB: from repo root run: docker compose up -d --force-recreate postgres redis"
+            )
+        raise
     app_state.db_ready = True
 
     # Seed admin user for local/dev so protected routes work.
@@ -49,6 +76,14 @@ async def lifespan(app: FastAPI):
         await seed_admin_user()
     except Exception as e:
         log.warning("admin seeding failed: %s", e)
+    try:
+        await seed_blizzard_scenarios()
+    except Exception as e:
+        log.warning("blizzard scenario seeding failed: %s", e)
+    try:
+        await seed_warehouse_candidates()
+    except Exception as e:
+        log.warning("warehouse candidate seeding failed: %s", e)
 
     redis_client = None
     try:

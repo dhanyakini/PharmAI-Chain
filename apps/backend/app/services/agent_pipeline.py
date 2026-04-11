@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import Any, NotRequired, TypedDict
 
 from langgraph.graph import END, StateGraph
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.database.models import Shipment, ShipmentStatus, WarehouseCandidate
+from app.database.models import Shipment, ShipmentStatus
+from app.services.warehouse_service import haversine_km, pick_nearest_cold_storage_warehouse
 
 
 class AgentState(TypedDict):
@@ -30,13 +30,6 @@ class AgentState(TypedDict):
     confidence_score: NotRequired[float | None]
 
 
-def _dist_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
-    # Lightweight distance approximation for candidate ranking.
-    from app.services.simulation_engine import _haversine_km
-
-    return _haversine_km(lat1, lng1, lat2, lng2)
-
-
 async def suggest_reroute(
     *,
     session: AsyncSession,
@@ -51,11 +44,19 @@ async def suggest_reroute(
     """Return reroute suggestion only (no auto-apply)."""
     settings = get_settings()
 
-    # Spam guard: don't suggest again while a reroute is "active" and cold conditions persist.
+    # Spam guard: skip full LangGraph re-run while reroute is active and still cold — but still
+    # attach nearest warehouse so blizzard/confirm paths can route truck → staging, not → final only.
     if shipment.status == ShipmentStatus.rerouted and internal_temp_f <= settings.temperature_threshold_f:
+        wh = await pick_nearest_cold_storage_warehouse(session, lat=current_lat, lng=current_lng)
         return {
             "reroute_suggested": False,
             "reason": "Reroute already active; waiting for temperature stabilization",
+            "warehouse_candidate": wh,
+            "decision_reason": (
+                f"internal_temp_f={internal_temp_f:.2f}F; reroute active, ambient risk continues."
+            ),
+            "reasoning_trace": "Nearest cold-storage staging point attached for routing while cargo recovers.",
+            "confidence_score": None,
         }
 
     # --- Node implementations (capture session/settings in closures) ---
@@ -70,40 +71,18 @@ async def suggest_reroute(
         }
 
     async def dispatcher_agent(state: AgentState) -> dict[str, Any]:
-        # Select a cold-storage capable warehouse near current position.
-        wh_q = await session.execute(
-            select(WarehouseCandidate)
-            .where(WarehouseCandidate.has_cold_storage == True)  # noqa: E712
-            .order_by(
-                # Order by straight-line distance approximation.
-                # Note: SQL can't call python function; we fallback to client-side ranking.
-            )
+        wh = await pick_nearest_cold_storage_warehouse(
+            session,
+            lat=float(state["current_lat"]),
+            lng=float(state["current_lng"]),
         )
-        candidates = wh_q.scalars().all()
-        if not candidates:
-            return {"warehouse_candidate": None}
-
-        ranked = sorted(
-            candidates,
-            key=lambda w: _dist_km(state["current_lat"], state["current_lng"], float(w.lat), float(w.lng)),
-        )
-        best = ranked[0]
-        return {
-            "warehouse_candidate": {
-                "id": best.id,
-                "name": best.name,
-                "lat": float(best.lat),
-                "lng": float(best.lng),
-                "state": best.state,
-                "has_cold_storage": best.has_cold_storage,
-            }
-        }
+        return {"warehouse_candidate": wh}
 
     async def supervisor_agent(state: AgentState) -> dict[str, Any]:
         # Weighted decision model (safety/time/cost approximations).
         safety_score = float(state["risk_level"])
 
-        destination_dist_km = _dist_km(
+        destination_dist_km = haversine_km(
             state["current_lat"],
             state["current_lng"],
             state["destination_lat"],
@@ -112,7 +91,9 @@ async def suggest_reroute(
         # Approx time/cost: being closer to a warehouse should reduce emergency staging cost.
         wh = state.get("warehouse_candidate")
         if wh is not None:
-            wh_dist_km = _dist_km(state["current_lat"], state["current_lng"], float(wh["lat"]), float(wh["lng"]))
+            wh_dist_km = haversine_km(
+                state["current_lat"], state["current_lng"], float(wh["lat"]), float(wh["lng"])
+            )
             extra_cost_penalty = min(1.0, wh_dist_km / (destination_dist_km + 1e-6))
         else:
             extra_cost_penalty = 0.3

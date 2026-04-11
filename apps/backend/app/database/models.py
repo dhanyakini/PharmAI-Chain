@@ -160,3 +160,21 @@ class WarehouseCandidate(Base):
     has_cold_storage: Mapped[bool] = mapped_column(Boolean, default=True)
     capacity_units: Mapped[int] = mapped_column(Integer, default=0)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class BlizzardScenario(Base):
+    """Synthetic / curated severe-winter profiles for simulation (out-of-season demos)."""
+
+    __tablename__ = "blizzard_scenarios"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    slug: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(256))
+    external_temp_f: Mapped[float] = mapped_column(Float)
+    wind_speed_mph: Mapped[float | None] = mapped_column(Float, nullable=True)
+    visibility_miles: Mapped[float | None] = mapped_column(Float, nullable=True)
+    precip_type: Mapped[str] = mapped_column(String(32), default="snow")
+    weather_state: Mapped[str] = mapped_column(String(64), default="blizzard")
+    risk_level: Mapped[float] = mapped_column(Float, default=0.9)
+    synopsis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extra_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

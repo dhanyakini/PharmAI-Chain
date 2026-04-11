@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     groq_model: str = "llama-3.3-70b-versatile"
     groq_base_url: str = "https://api.groq.com/openai/v1"
 
+    # Live weather (OpenWeather Current Weather API). Optional: if unset, fallback ambient is used.
+    openweather_api_key: str | None = None
+    openweather_base_url: str = "https://api.openweathermap.org/data/2.5/weather"
+    weather_cache_ttl_seconds: float = 300.0
+
     cors_origins: str = "http://localhost:5173"
     ws_origin: str = "http://localhost:5173"
 

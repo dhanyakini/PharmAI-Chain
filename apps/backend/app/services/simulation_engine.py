@@ -29,7 +29,9 @@ from app.database.models import (
 from app.database.session import get_session_factory
 from app.services.pubsub_service import CHANNEL_LIFECYCLE, CHANNEL_TELEMETRY, RedisPubSub, get_redis_client
 from app.services.thermal_model import update_internal_temp_f
-from app.services.weather_engine import get_weather_at
+from app.services.routing_service import route_truck_to_reroute_target
+from app.services.warehouse_service import pick_nearest_cold_storage_warehouse
+from app.services.weather_service import resolve_weather_for_simulation
 
 
 SIM_STATE_KEY_PREFIX = "simulation_state"
@@ -64,6 +66,8 @@ class SimulationRuntime:
     route_total_km: float = 0.0
     target_duration_seconds: float = 120.0
     started_at_monotonic: float = 0.0
+    # DB `blizzard_scenarios.id` — when set, overrides live API for this run (summer demos).
+    blizzard_scenario_id: int | None = None
 
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -301,7 +305,7 @@ def _route_polyline_from_db(polyline_json: Any) -> list[list[float]]:
     return [[float(p[0]), float(p[1])] for p in polyline_json]
 
 
-async def start_simulation_worker(shipment_id: int) -> None:
+async def start_simulation_worker(shipment_id: int, blizzard_scenario_id: int | None = None) -> None:
     """Start a background simulation worker for a shipment."""
     if shipment_id in simulation_task_registry:
         raise RuntimeError("Simulation already running for this shipment")
@@ -356,6 +360,7 @@ async def start_simulation_worker(shipment_id: int) -> None:
             route_total_km=_polyline_total_km(route_polyline),
             target_duration_seconds=max(30.0, float(settings.simulation_target_duration_seconds)),
             started_at_monotonic=time.monotonic(),
+            blizzard_scenario_id=blizzard_scenario_id,
         )
 
         simulation_runtime_registry[shipment_id] = runtime
@@ -411,6 +416,7 @@ async def apply_reroute_to_running_shipment(shipment_id: int, new_polyline: list
         runtime.route_polyline = new_polyline
         runtime.segment_idx = 0
         runtime.segment_progress_km = 0.0
+        runtime.route_total_km = _polyline_total_km(new_polyline)
 
 
 async def _simulation_loop(shipment_id: int) -> None:
@@ -449,7 +455,15 @@ async def _simulation_loop(shipment_id: int) -> None:
             # Send initial telemetry immediately.
             while True:
                 async with runtime.lock:
-                    weather = get_weather_at(runtime.truck_lat, runtime.truck_lng)
+                    w_lat = float(runtime.truck_lat)
+                    w_lng = float(runtime.truck_lng)
+                    w_scenario = runtime.blizzard_scenario_id
+
+                weather = await resolve_weather_for_simulation(
+                    session, w_lat, w_lng, blizzard_scenario_id=w_scenario
+                )
+
+                async with runtime.lock:
                     weather_state = str(weather["weather_state"])
                     external_temp_f = float(weather["external_temp_f"])
                     weather_risk = float(weather["risk_level"])
@@ -510,15 +524,19 @@ async def _simulation_loop(shipment_id: int) -> None:
                         # Hard safety gate: immediately pause and request user reroute decision
                         # on first blizzard entry, independent of agent-model output timing.
                         if runtime.pending_reroute is None and not runtime.blizzard_prompted_in_current_zone:
+                            wh_blizz = await pick_nearest_cold_storage_warehouse(
+                                session,
+                                lat=float(runtime.truck_lat),
+                                lng=float(runtime.truck_lng),
+                            )
                             preview_payload: dict[str, Any] = {}
                             try:
-                                from app.services.routing_service import generate_route_polyline
-
-                                alt = await generate_route_polyline(
-                                    origin_lat=float(runtime.truck_lat),
-                                    origin_lng=float(runtime.truck_lng),
-                                    destination_lat=float(shipment.destination_lat),
-                                    destination_lng=float(shipment.destination_lng),
+                                alt = await route_truck_to_reroute_target(
+                                    truck_lat=float(runtime.truck_lat),
+                                    truck_lng=float(runtime.truck_lng),
+                                    final_destination_lat=float(shipment.destination_lat),
+                                    final_destination_lng=float(shipment.destination_lng),
+                                    warehouse_candidate=wh_blizz,
                                 )
                                 preview_polyline = alt.get("polyline") or []
                                 if preview_polyline:
@@ -534,7 +552,7 @@ async def _simulation_loop(shipment_id: int) -> None:
                             runtime.pending_reroute = {
                                 "reroute_suggested": True,
                                 "confidence_score": None,
-                                "warehouse_candidate": None,
+                                "warehouse_candidate": wh_blizz,
                                 "decision_reason": "Blizzard detected on active route. Confirm reroute to continue safely.",
                                 "reasoning_trace": "Simulation paused for mandatory user reroute confirmation.",
                                 "trigger_reason": "blizzard_detected",
@@ -699,13 +717,13 @@ async def _simulation_loop(shipment_id: int) -> None:
                             if should_prompt_user:
                                 preview_payload: dict[str, Any] = {}
                                 try:
-                                    from app.services.routing_service import generate_route_polyline
-
-                                    alt = await generate_route_polyline(
-                                        origin_lat=float(runtime.truck_lat),
-                                        origin_lng=float(runtime.truck_lng),
-                                        destination_lat=float(shipment.destination_lat),
-                                        destination_lng=float(shipment.destination_lng),
+                                    wh = suggestion.get("warehouse_candidate")
+                                    alt = await route_truck_to_reroute_target(
+                                        truck_lat=float(runtime.truck_lat),
+                                        truck_lng=float(runtime.truck_lng),
+                                        final_destination_lat=float(shipment.destination_lat),
+                                        final_destination_lng=float(shipment.destination_lng),
+                                        warehouse_candidate=wh if isinstance(wh, dict) else None,
                                     )
                                     preview_polyline = alt.get("polyline") or []
                                     if preview_polyline:
@@ -789,15 +807,19 @@ async def _simulation_loop(shipment_id: int) -> None:
                         except Exception:
                             # Agent suggestion is best-effort. For blizzard entry, force user confirmation flow.
                             if now_in_zone and not runtime.blizzard_prompted_in_current_zone:
+                                wh_fallback = await pick_nearest_cold_storage_warehouse(
+                                    session,
+                                    lat=float(runtime.truck_lat),
+                                    lng=float(runtime.truck_lng),
+                                )
                                 preview_payload: dict[str, Any] = {}
                                 try:
-                                    from app.services.routing_service import generate_route_polyline
-
-                                    alt = await generate_route_polyline(
-                                        origin_lat=float(runtime.truck_lat),
-                                        origin_lng=float(runtime.truck_lng),
-                                        destination_lat=float(shipment.destination_lat),
-                                        destination_lng=float(shipment.destination_lng),
+                                    alt = await route_truck_to_reroute_target(
+                                        truck_lat=float(runtime.truck_lat),
+                                        truck_lng=float(runtime.truck_lng),
+                                        final_destination_lat=float(shipment.destination_lat),
+                                        final_destination_lng=float(shipment.destination_lng),
+                                        warehouse_candidate=wh_fallback,
                                     )
                                     preview_polyline = alt.get("polyline") or []
                                     if preview_polyline:
@@ -813,7 +835,7 @@ async def _simulation_loop(shipment_id: int) -> None:
                                 runtime.pending_reroute = {
                                     "reroute_suggested": True,
                                     "confidence_score": None,
-                                    "warehouse_candidate": None,
+                                    "warehouse_candidate": wh_fallback,
                                     "decision_reason": "Blizzard detected on route. Manual reroute confirmation required.",
                                     "reasoning_trace": "Safety gate triggered by blizzard zone entry.",
                                     "trigger_reason": "blizzard_detected",
@@ -868,6 +890,9 @@ async def _simulation_loop(shipment_id: int) -> None:
                         risk_level=risk_level,
                         route_segment=route_segment,
                         raw_payload={
+                            "weather_source": weather.get("source"),
+                            "blizzard_scenario_id": weather.get("blizzard_scenario_id"),
+                            "blizzard_scenario_slug": weather.get("blizzard_scenario_slug"),
                             "segment_idx": runtime.segment_idx,
                             "segment_progress_km": runtime.segment_progress_km,
                             "remaining_distance_km": max(0.0, remaining_distance_km - distance_to_travel_km),
@@ -938,7 +963,13 @@ async def _simulation_loop(shipment_id: int) -> None:
                             "internal_temp_f": runtime.internal_temp_f,
                             "temperature_violated": runtime.temperature_violated,
                         },
-                        "weather": {"weather_state": weather_state, "risk_level": risk_level},
+                        "weather": {
+                            "weather_state": weather_state,
+                            "risk_level": risk_level,
+                            "external_temp_f": external_temp_f,
+                            "source": weather.get("source"),
+                            "blizzard_scenario_id": weather.get("blizzard_scenario_id"),
+                        },
                         "controls": {
                             "paused_for_reroute_confirmation": runtime.paused_for_reroute_confirmation,
                             "pending_reroute": runtime.pending_reroute,

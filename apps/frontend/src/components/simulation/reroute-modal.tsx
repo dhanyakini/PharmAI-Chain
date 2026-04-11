@@ -28,10 +28,12 @@ export default function RerouteModal({
 }) {
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const inFlightRef = React.useRef(false);
 
   async function onConfirm() {
-    if (!suggestion) return;
+    if (!suggestion || inFlightRef.current) return;
     setError(null);
+    inFlightRef.current = true;
     setSubmitting(true);
     try {
       await api.post(`/simulation/confirm-reroute/${shipmentId}`);
@@ -40,12 +42,15 @@ export default function RerouteModal({
     } catch (e: any) {
       setError(e?.response?.data?.detail ?? "Failed to apply reroute");
     } finally {
+      inFlightRef.current = false;
       setSubmitting(false);
     }
   }
 
   async function onReject() {
+    if (inFlightRef.current) return;
     setError(null);
+    inFlightRef.current = true;
     setSubmitting(true);
     try {
       await api.post(`/simulation/reject-reroute/${shipmentId}`);
@@ -54,6 +59,7 @@ export default function RerouteModal({
     } catch (e: any) {
       setError(e?.response?.data?.detail ?? "Failed to reject reroute");
     } finally {
+      inFlightRef.current = false;
       setSubmitting(false);
     }
   }
