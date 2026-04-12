@@ -18,6 +18,8 @@ FastAPI service for **Project Sentinel**: cold-chain **simulation**, **PostgreSQ
 
 See **[docs/AGENTIC_REROUTE.md](../../docs/AGENTIC_REROUTE.md)** for the planner → critic → supervisor loop, tool allowlists, and admin observability endpoint `GET /shipments/{id}/agent-decisions`.
 
+**Architecture diagrams:** **[docs/FLOWCHARTS.md](../../docs/FLOWCHARTS.md)** (Mermaid) — same flows as PNGs via `cd docs && npm run diagrams:png` (see monorepo **README**).
+
 ## Dependencies
 
 Declared in **`requirements.txt`**. Use a virtual environment:

@@ -1,0 +1,16 @@
+{
+  "name": "sentinel-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "node scripts/install-mermaid-chrome.mjs",
+    "diagrams:install-browser": "npx puppeteer browsers install chrome-headless-shell",
+    "diagrams:png": "node scripts/export-mermaid-png.mjs",
+    "diagrams:png:all": "npm run diagrams:install-browser && npm run diagrams:png",
+    "diagrams:png:install": "npm install && npm run diagrams:png"
+  },
+  "devDependencies": {
+    "@mermaid-js/mermaid-cli": "^11.4.2",
+    "puppeteer": "^23.11.1"
+  }
+}

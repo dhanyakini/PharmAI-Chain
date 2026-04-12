@@ -1,0 +1,51 @@
+{
+  "theme": "base",
+  "themeVariables": {
+    "fontFamily": "ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif",
+    "fontSize": "15px",
+    "primaryColor": "#0d9488",
+    "primaryTextColor": "#f0fdfa",
+    "primaryBorderColor": "#0f766e",
+    "secondaryColor": "#e2e8f0",
+    "secondaryTextColor": "#1e293b",
+    "secondaryBorderColor": "#94a3b8",
+    "tertiaryColor": "#f8fafc",
+    "tertiaryBorderColor": "#cbd5e1",
+    "lineColor": "#64748b",
+    "textColor": "#0f172a",
+    "mainBkg": "#ffffff",
+    "nodeBorder": "#94a3b8",
+    "clusterBkg": "#f1f5f9",
+    "clusterBorder": "#94a3b8",
+    "edgeLabelBackground": "#ffffff",
+    "actorBkg": "#ccfbf1",
+    "actorBorder": "#0d9488",
+    "actorTextColor": "#134e4a",
+    "actorLineColor": "#0d9488",
+    "signalColor": "#334155",
+    "signalTextColor": "#0f172a",
+    "labelBoxBkgColor": "#f0fdfa",
+    "labelBoxBorderColor": "#0d9488",
+    "labelTextColor": "#134e4a",
+    "loopTextColor": "#0f172a",
+    "noteBkgColor": "#fffbeb",
+    "noteTextColor": "#78350f",
+    "noteBorderColor": "#d97706"
+  },
+  "flowchart": {
+    "curve": "basis",
+    "padding": 14,
+    "nodeSpacing": 48,
+    "rankSpacing": 56,
+    "diagramPadding": 12,
+    "htmlLabels": true
+  },
+  "sequence": {
+    "actorFontSize": 14,
+    "messageFontSize": 13,
+    "noteFontSize": 12,
+    "mirrorActors": false,
+    "boxMargin": 8,
+    "boxTextMargin": 6
+  }
+}

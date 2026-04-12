@@ -99,13 +99,29 @@ pytest tests/ -q
 
 Tests use in-memory SQLite and stubbed routing (no live OSRM/Groq required).
 
+## Architecture diagrams (Mermaid → PNG)
+
+[docs/FLOWCHARTS.md](docs/FLOWCHARTS.md) contains Mermaid flowcharts (system context, auth, simulation, agentic reroute, etc.). To **render PNGs** for slides or reports:
+
+```bash
+cd docs
+npm install
+npm run diagrams:png
+```
+
+- **Output:** `docs/diagrams/png/` — filenames match each **`##` section title** (slugified), e.g. `system-context.png`, `authentication-flow.png`, `authentication-flow-2.png` for a second chart under the same section.
+- **Sources:** `docs/diagrams/build/*.mmd` (intermediate).
+- If you see **Could not find Chrome**, run `npm run diagrams:install-browser` (or `npm run diagrams:png:all`) — see [FLOWCHARTS.md § Exporting](docs/FLOWCHARTS.md#exporting-diagrams-to-png).
+
+`docs/package.json` owns **`@mermaid-js/mermaid-cli`** and **`puppeteer`**; generated assets are gitignored by default (`docs/.gitignore`).
+
 ## Project layout
 
 | Path | Role |
 |------|------|
 | `apps/backend` | FastAPI app, Alembic, `pytest` |
 | `apps/frontend` | Vite + React |
-| `docs/` | API contract, agentic reroute, simulation notes |
+| `docs/` | API contract, **FLOWCHARTS** (Mermaid + PNG export scripts), agentic reroute, simulation manual |
 | `docker-compose.yml` | Postgres, Redis, optional full stack |
 
 ## Environment & Git

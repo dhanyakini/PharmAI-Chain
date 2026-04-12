@@ -4,7 +4,9 @@ React **Vite** client for **Project Sentinel**: dashboard, shipments, JWT auth, 
 
 **Monorepo:** [../../README.md](../../README.md) · **Backend API:** [../backend/README.md](../backend/README.md)
 
-**Docs:** [../../docs/API_CONTRACT.md](../../docs/API_CONTRACT.md) · [../../docs/sentinel_backend_manual_simulation.md](../../docs/sentinel_backend_manual_simulation.md)
+**Docs:** [../../docs/API_CONTRACT.md](../../docs/API_CONTRACT.md) · [../../docs/FLOWCHARTS.md](../../docs/FLOWCHARTS.md) (system + auth + simulation UI flows) · [../../docs/sentinel_backend_manual_simulation.md](../../docs/sentinel_backend_manual_simulation.md)
+
+PNG exports of those diagrams: from repo root, `cd docs && npm install && npm run diagrams:png` → **`docs/diagrams/png/`** (files named after each `##` section in FLOWCHARTS.md).
 
 ## What lives here
 
