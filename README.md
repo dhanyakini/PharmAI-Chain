@@ -4,7 +4,7 @@ Pharmaceutical **cold-chain logistics simulator**: **FastAPI** backend (PostgreS
 
 **Per-app guides:** [apps/backend/README.md](apps/backend/README.md) · [apps/frontend/README.md](apps/frontend/README.md)
 
-**Docs:** [docs/API_CONTRACT.md](docs/API_CONTRACT.md) · [docs/AGENTIC_REROUTE.md](docs/AGENTIC_REROUTE.md) · [docs/sentinel_backend_manual_simulation.md](docs/sentinel_backend_manual_simulation.md)
+**Docs:** [docs/FLOWCHARTS.md](docs/FLOWCHARTS.md) · [docs/API_CONTRACT.md](docs/API_CONTRACT.md) · [docs/AGENTIC_REROUTE.md](docs/AGENTIC_REROUTE.md) · [docs/sentinel_backend_manual_simulation.md](docs/sentinel_backend_manual_simulation.md)
 
 ## Secrets
 
