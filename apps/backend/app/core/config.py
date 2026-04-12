@@ -29,7 +29,10 @@ class Settings(BaseSettings):
     database_url: str = Field(..., description="async SQLAlchemy URL, e.g. postgresql+asyncpg://...")
     redis_url: str = Field(..., description="redis://host:port/db")
 
-    groq_api_key: str = Field(..., min_length=1)
+    groq_api_key: str = Field(
+        default="",
+        description="Groq API key for agentic LLM path; empty string falls back to deterministic policy.",
+    )
     groq_model: str = "llama-3.3-70b-versatile"
     groq_base_url: str = "https://api.groq.com/openai/v1"
 

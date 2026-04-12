@@ -26,6 +26,8 @@ from app.database.models import (
 from app.services.lifecycle_service import emit_lifecycle_event
 from app.services.pubsub_service import get_redis_client
 from app.services.routing_service import route_truck_to_reroute_target
+from app.database.session import get_session_factory
+from app.services.agent_memory_service import append_rejected_suggestion, mark_latest_pending_feedback
 from app.services.simulation_engine import (
     apply_reroute_to_running_shipment,
     simulation_task_registry,
@@ -188,6 +190,13 @@ async def confirm_reroute(
         session.add(rh)
         await session.commit()
 
+        try:
+            async with get_session_factory() as fb_session:
+                await mark_latest_pending_feedback(fb_session, shipment_id, "confirmed")
+                await fb_session.commit()
+        except Exception:
+            pass
+
         await emit_lifecycle_event(
             shipment_id=shipment_id,
             event_name="reroute_confirmed",
@@ -228,16 +237,29 @@ async def confirm_reroute(
 async def reject_reroute(
     shipment_id: int,
     _: Any = Depends(require_admin),
+    session: AsyncSession = Depends(get_db_session),
 ) -> SimulationActionResponse:
     runtime = simulation_runtime_registry.get(shipment_id)
     if runtime is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Simulation not running")
 
+    pending_snapshot: dict[str, Any] | None = None
     async with runtime.lock:
         if runtime.pending_reroute is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No reroute suggestion pending")
+        pending_snapshot = dict(runtime.pending_reroute)
         runtime.pending_reroute = None
         runtime.paused_for_reroute_confirmation = False
+
+    try:
+        wh = (pending_snapshot or {}).get("warehouse_candidate")
+        wid = int(wh["id"]) if isinstance(wh, dict) and wh.get("id") is not None else None
+        tgt = "warehouse" if wid is not None else "final"
+        await append_rejected_suggestion(session, shipment_id, target=tgt, warehouse_id=wid)
+        await mark_latest_pending_feedback(session, shipment_id, "rejected")
+        await session.commit()
+    except Exception:
+        await session.rollback()
 
     await emit_lifecycle_event(
         shipment_id=shipment_id,

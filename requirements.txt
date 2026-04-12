@@ -1,0 +1,2 @@
+# Monorepo convenience: backend deps (includes psycopg2-binary for Alembic).
+-r apps/backend/requirements.txt

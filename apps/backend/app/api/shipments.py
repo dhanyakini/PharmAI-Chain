@@ -21,6 +21,7 @@ from app.database.models import (
     ShipmentStatus,
     TelemetryLog,
 )
+from app.services.agent_memory_service import list_agent_decision_logs
 from app.services.pubsub_service import CHANNEL_LIFECYCLE, RedisPubSub, get_redis_client
 
 router = APIRouter(prefix="/shipments", tags=["shipments"])
@@ -243,5 +244,33 @@ async def get_shipment_interventions(
             "raw_model_output": i.raw_model_output_json,
         }
         for i in logs
+    ]
+
+
+@router.get("/{shipment_id}/agent-decisions")
+async def get_shipment_agent_decisions(
+    shipment_id: int,
+    _: Any = Depends(require_admin),
+    session: AsyncSession = Depends(get_db_session),
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Observability: agentic reroute decision history (prompts/tool traces via JSON blobs)."""
+    sh_q = await session.execute(select(Shipment).where(Shipment.id == shipment_id))
+    if sh_q.scalar_one_or_none() is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shipment not found")
+
+    rows = await list_agent_decision_logs(session, shipment_id, limit=min(limit, 200))
+    return [
+        {
+            "id": r.id,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "decision": r.decision_json,
+            "planner": r.planner_json,
+            "critic": r.critic_json,
+            "tool_traces": r.tool_traces_json,
+            "supervisor": r.supervisor_json,
+            "operator_feedback": r.operator_feedback,
+        }
+        for r in rows
     ]
 

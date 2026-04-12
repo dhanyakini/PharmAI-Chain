@@ -6,6 +6,7 @@ import enum
 from datetime import UTC, datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     Enum,
@@ -17,7 +18,6 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -85,6 +85,37 @@ class Shipment(Base):
     route_history: Mapped[list["RouteHistory"]] = relationship(back_populates="shipment")
 
 
+class AgentShipmentMemory(Base):
+    """Per-shipment agent memory (rejected candidates, last suggestion) for feedback loop."""
+
+    __tablename__ = "agent_shipment_memory"
+
+    shipment_id: Mapped[int] = mapped_column(
+        ForeignKey("shipments.id", ondelete="CASCADE"), primary_key=True
+    )
+    memory_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AgentDecisionLog(Base):
+    """Observability + operator feedback for agentic reroute runs."""
+
+    __tablename__ = "agent_decision_logs"
+    __table_args__ = (Index("ix_agent_decision_shipment_ts", "shipment_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    shipment_id: Mapped[int] = mapped_column(ForeignKey("shipments.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    decision_json: Mapped[dict] = mapped_column(JSON)
+    planner_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    critic_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    tool_traces_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    supervisor_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    operator_feedback: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+
 class TelemetryLog(Base):
     __tablename__ = "telemetry_logs"
     __table_args__ = (Index("ix_telemetry_shipment_ts", "shipment_id", "timestamp"),)
@@ -99,7 +130,7 @@ class TelemetryLog(Base):
     weather_state: Mapped[str] = mapped_column(String(64))
     route_segment: Mapped[str] = mapped_column(String(128), default="")
     risk_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    raw_payload_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    raw_payload_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     shipment: Mapped["Shipment"] = relationship(back_populates="telemetry_logs")
 
@@ -115,9 +146,9 @@ class InterventionLog(Base):
     trigger_reason: Mapped[str] = mapped_column(Text)
     reasoning_trace: Mapped[str] = mapped_column(Text)
     action_taken: Mapped[str] = mapped_column(String(256))
-    suggested_route_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    suggested_route_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    raw_model_output_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    raw_model_output_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     shipment: Mapped["Shipment"] = relationship(back_populates="interventions")
 
@@ -131,7 +162,7 @@ class RouteHistory(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     route_name: Mapped[str] = mapped_column(String(256))
     reason: Mapped[str] = mapped_column(Text, default="")
-    polyline_json: Mapped[list[list[float]] | None] = mapped_column(JSONB, nullable=True)
+    polyline_json: Mapped[list[list[float]] | None] = mapped_column(JSON, nullable=True)
     distance_km: Mapped[float | None] = mapped_column(Float, nullable=True)
     eta_minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
 
@@ -146,7 +177,7 @@ class LifecycleEventLog(Base):
     shipment_id: Mapped[int] = mapped_column(ForeignKey("shipments.id", ondelete="CASCADE"))
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     event: Mapped[str] = mapped_column(String(128))
-    payload_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    payload_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class WarehouseCandidate(Base):
@@ -177,4 +208,4 @@ class BlizzardScenario(Base):
     weather_state: Mapped[str] = mapped_column(String(64), default="blizzard")
     risk_level: Mapped[float] = mapped_column(Float, default=0.9)
     synopsis: Mapped[str | None] = mapped_column(Text, nullable=True)
-    extra_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    extra_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
