@@ -29,7 +29,7 @@ from app.database.models import (
 from app.database.session import get_session_factory
 from app.services.pubsub_service import CHANNEL_LIFECYCLE, CHANNEL_TELEMETRY, RedisPubSub, get_redis_client
 from app.services.thermal_model import update_internal_temp_f
-from app.services.routing_service import route_truck_to_reroute_target
+from app.services.routing_service import generate_route_polyline, route_truck_to_reroute_target
 from app.services.warehouse_service import (
     nullify_warehouse_if_final_is_as_close_or_closer,
     pick_nearest_cold_storage_warehouse,
@@ -308,6 +308,68 @@ def _route_polyline_from_db(polyline_json: Any) -> list[list[float]]:
     return [[float(p[0]), float(p[1])] for p in polyline_json]
 
 
+def _closest_point_on_polyline(
+    polyline: list[list[float]],
+    lat: float,
+    lng: float,
+) -> tuple[int, float, float, float]:
+    """Closest point on polyline to (lat, lng).
+
+    Returns ``(segment_idx, progress_km_along_segment, snap_lat, snap_lng)`` so movement can continue
+    from the snapped position without jumping back to the route origin.
+    """
+    if not polyline:
+        raise ValueError("Polyline empty")
+    if len(polyline) == 1:
+        return 0, 0.0, float(polyline[0][0]), float(polyline[0][1])
+
+    best_i = 0
+    best_prog = 0.0
+    best_lat = float(polyline[0][0])
+    best_lng = float(polyline[0][1])
+    best_d = float("inf")
+
+    for i in range(len(polyline) - 1):
+        lat0, lng0 = float(polyline[i][0]), float(polyline[i][1])
+        lat1, lng1 = float(polyline[i + 1][0]), float(polyline[i + 1][1])
+        seg_len = _haversine_km(lat0, lng0, lat1, lng1)
+        if seg_len <= 1e-12:
+            d = _haversine_km(lat, lng, lat0, lng0)
+            if d < best_d:
+                best_d, best_i, best_prog, best_lat, best_lng = d, i, 0.0, lat0, lng0
+            continue
+        dx, dy = lat1 - lat0, lng1 - lng0
+        denom = dx * dx + dy * dy
+        if denom < 1e-18:
+            t = 0.0
+        else:
+            t = max(0.0, min(1.0, ((lat - lat0) * dx + (lng - lng0) * dy) / denom))
+        pr_lat = lat0 + t * dx
+        pr_lng = lng0 + t * dy
+        prog = t * seg_len
+        d = _haversine_km(lat, lng, pr_lat, pr_lng)
+        if d < best_d:
+            best_d = d
+            best_i = i
+            best_prog = prog
+            best_lat, best_lng = pr_lat, pr_lng
+
+    return best_i, best_prog, best_lat, best_lng
+
+
+def _heading_from_snap_on_polyline(
+    polyline: list[list[float]],
+    segment_idx: int,
+    snap_lat: float,
+    snap_lng: float,
+) -> float:
+    if len(polyline) < 2:
+        return 0.0
+    idx = max(0, min(segment_idx, len(polyline) - 2))
+    lat1, lng1 = float(polyline[idx + 1][0]), float(polyline[idx + 1][1])
+    return _bearing_deg(snap_lat, snap_lng, lat1, lng1)
+
+
 async def start_simulation_worker(shipment_id: int, blizzard_scenario_id: int | None = None) -> None:
     """Start a background simulation worker for a shipment."""
     if shipment_id in simulation_task_registry:
@@ -335,21 +397,76 @@ async def start_simulation_worker(shipment_id: int, blizzard_scenario_id: int | 
         start_lat = float(shipment.current_lat if shipment.current_lat is not None else route_polyline[0][0])
         start_lng = float(shipment.current_lng if shipment.current_lng is not None else route_polyline[0][1])
 
-        # Compute initial heading from the first segment direction.
-        initial_heading = _bearing_deg(
-            start_lat,
-            start_lng,
-            route_polyline[1][0],
-            route_polyline[1][1],
+        on_warehouse_detour = route_row.route_name == "reroute_applied" and (
+            (route_row.reason or "") == "user_confirmed_to_warehouse"
         )
+        replan_to_final = blizzard_scenario_id is None and (
+            on_warehouse_detour or shipment.status == ShipmentStatus.rerouted
+        )
+
+        segment_idx = 0
+        segment_progress_km = 0.0
+        truck_lat = start_lat
+        truck_lng = start_lng
+        initial_heading = 0.0
+        runtime_shipment_status = shipment.status
+
+        if replan_to_final:
+            seg_i, _, snap_lat, snap_lng = _closest_point_on_polyline(route_polyline, start_lat, start_lng)
+            prefix = [list(p) for p in route_polyline[: seg_i + 1]]
+            if prefix:
+                prefix[-1] = [snap_lat, snap_lng]
+            try:
+                leg = await generate_route_polyline(
+                    origin_lat=snap_lat,
+                    origin_lng=snap_lng,
+                    destination_lat=float(shipment.destination_lat),
+                    destination_lng=float(shipment.destination_lng),
+                )
+                rem_raw = leg.get("polyline") or []
+                rem = [[float(p[0]), float(p[1])] for p in rem_raw]
+                if len(rem) < 2:
+                    raise RuntimeError("OSRM returned insufficient points for resume-to-final")
+                rem[0] = [snap_lat, snap_lng]
+                full_for_db = prefix + rem[1:] if prefix else rem
+                session.add(
+                    RouteHistory(
+                        shipment_id=shipment_id,
+                        timestamp=utcnow(),
+                        route_name="live_weather_resume_final",
+                        reason="replan_truck_to_scheduled_destination",
+                        polyline_json=full_for_db,
+                        distance_km=float(leg.get("distance_km") or 0.0),
+                        eta_minutes=float(leg.get("eta_minutes") or 0.0),
+                    )
+                )
+                route_polyline = rem
+                segment_idx = 0
+                segment_progress_km = 0.0
+                truck_lat, truck_lng = snap_lat, snap_lng
+                shipment.status = ShipmentStatus.in_transit
+                runtime_shipment_status = ShipmentStatus.in_transit
+                initial_heading = _bearing_deg(snap_lat, snap_lng, route_polyline[1][0], route_polyline[1][1])
+            except Exception:
+                segment_idx, segment_progress_km, snap_lat, snap_lng = _closest_point_on_polyline(
+                    route_polyline, start_lat, start_lng
+                )
+                truck_lat, truck_lng = snap_lat, snap_lng
+                initial_heading = _heading_from_snap_on_polyline(route_polyline, segment_idx, snap_lat, snap_lng)
+        else:
+            segment_idx, segment_progress_km, snap_lat, snap_lng = _closest_point_on_polyline(
+                route_polyline, start_lat, start_lng
+            )
+            truck_lat, truck_lng = snap_lat, snap_lng
+            initial_heading = _heading_from_snap_on_polyline(route_polyline, segment_idx, snap_lat, snap_lng)
 
         runtime = SimulationRuntime(
             shipment_id=shipment_id,
             route_polyline=route_polyline,
-            segment_idx=0,
-            segment_progress_km=0.0,
-            truck_lat=start_lat,
-            truck_lng=start_lng,
+            segment_idx=segment_idx,
+            segment_progress_km=segment_progress_km,
+            truck_lat=truck_lat,
+            truck_lng=truck_lng,
             heading_deg=initial_heading,
             speed_kmh=60.0,
             internal_temp_f=settings.hvac_setpoint_f,
@@ -359,7 +476,7 @@ async def start_simulation_worker(shipment_id: int, blizzard_scenario_id: int | 
             threshold_crossed_emitted=False,
             pending_reroute=None,
             paused_for_reroute_confirmation=False,
-            shipment_status=ShipmentStatus.in_transit,
+            shipment_status=runtime_shipment_status,
             route_total_km=_polyline_total_km(route_polyline),
             target_duration_seconds=max(30.0, float(settings.simulation_target_duration_seconds)),
             started_at_monotonic=time.monotonic(),
@@ -368,9 +485,8 @@ async def start_simulation_worker(shipment_id: int, blizzard_scenario_id: int | 
 
         simulation_runtime_registry[shipment_id] = runtime
 
-        shipment.status = ShipmentStatus.in_transit
-        shipment.current_lat = start_lat
-        shipment.current_lng = start_lng
+        shipment.current_lat = truck_lat
+        shipment.current_lng = truck_lng
         session.add(shipment)
         await session.commit()
 
@@ -396,10 +512,30 @@ async def stop_simulation_worker(shipment_id: int) -> None:
     # Remove from registries immediately so dashboards/state consumers update fast.
     simulation_task_registry.pop(shipment_id, None)
     simulation_runtime_registry.pop(shipment_id, None)
-    # Clear cached runtime state so `/simulation/state/{id}` immediately flips to not-running.
+    # Persist last truck position from Redis cache so the next start resumes from the stop location.
     try:
         redis_client = get_redis_client()
         state_key = f"{SIM_STATE_KEY_PREFIX}:{shipment_id}"
+        raw = await redis_client.get(state_key)
+        if raw:
+            try:
+                cached = json.loads(raw)
+                t = cached.get("truck") or {}
+                lat, lng = t.get("lat"), t.get("lng")
+                if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
+                    factory = get_session_factory()
+                    async with factory() as persist_session:
+                        sh_q = await persist_session.execute(
+                            select(Shipment).where(Shipment.id == shipment_id)
+                        )
+                        sh = sh_q.scalar_one_or_none()
+                        if sh is not None:
+                            sh.current_lat = float(lat)
+                            sh.current_lng = float(lng)
+                            persist_session.add(sh)
+                            await persist_session.commit()
+            except Exception:
+                pass
         await redis_client.delete(state_key)
         await redis_client.close()
     except Exception:
@@ -673,6 +809,7 @@ async def _simulation_loop(shipment_id: int) -> None:
                                 external_temp_f=external_temp_f,
                                 weather_state=weather_state,
                                 risk_level=risk_level,
+                                blizzard_scenario_id=w_scenario,
                             )
 
                             staging_opts = suggestion.get("staging_options") or []
@@ -733,6 +870,7 @@ async def _simulation_loop(shipment_id: int) -> None:
                                     "environment_assessment": suggestion.get("environment_assessment"),
                                     "staging_options": staging_opts,
                                     "navigation_options": nav_opts,
+                                    "agent_decision": suggestion.get("agent_decision"),
                                 },
                             )
                             await _persist_intervention_log(
@@ -762,6 +900,7 @@ async def _simulation_loop(shipment_id: int) -> None:
                                     "environment_assessment": suggestion.get("environment_assessment"),
                                     "staging_options": staging_opts,
                                     "navigation_options": nav_opts,
+                                    "agent_decision": suggestion.get("agent_decision"),
                                 },
                             )
 
