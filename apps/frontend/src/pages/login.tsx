@@ -1,5 +1,6 @@
 import * as React from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { Eye, EyeOff } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -13,21 +14,42 @@ export default function LoginPage() {
 
   const [username, setUsername] = React.useState("");
   const [password, setPassword] = React.useState("");
+  const [showPassword, setShowPassword] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
+
+  const passwordId = React.useId();
+  const usernameId = React.useId();
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
+    const u = username.trim();
+    if (!u || !password) {
+      setError(!u ? "Enter a username." : "Enter a password.");
+      setSubmitting(false);
+      return;
+    }
     try {
-      const res = await api.post("/auth/login", { username, password });
+      const res = await api.post("/auth/login", { username: u, password });
       const token: string = res.data.access_token;
       setToken(token);
-      await validateToken();
-      navigate("/");
-    } catch (err: any) {
-      setError(err?.response?.data?.detail ?? "Login failed");
+      const ok = await validateToken();
+      if (ok) {
+        navigate("/dashboard");
+      } else {
+        setError("Session could not be verified. Try again.");
+      }
+    } catch (err: unknown) {
+      const detail =
+        typeof err === "object" &&
+        err !== null &&
+        "response" in err &&
+        typeof (err as { response?: { data?: { detail?: string } } }).response?.data?.detail === "string"
+          ? (err as { response: { data: { detail: string } } }).response.data.detail
+          : "Login failed";
+      setError(detail);
     } finally {
       setSubmitting(false);
     }
@@ -35,37 +57,84 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6">
-      <div className="w-full max-w-md space-y-4 rounded-lg border bg-card p-6">
+      <div className="w-full max-w-md space-y-4 rounded-lg border bg-card p-6 shadow-sm">
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold">Admin Login</h1>
-          <p className="text-sm text-muted-foreground">Sign in to access the Sentinel control cockpit.</p>
+          <h1 className="text-2xl font-semibold">Sign in</h1>
+          <p className="text-sm text-muted-foreground">
+            Sentinel control cockpit — use the account created for your environment.
+          </p>
         </div>
-        <form className="space-y-3" onSubmit={onSubmit}>
+        <form className="space-y-3" onSubmit={onSubmit} noValidate>
           <div className="space-y-1">
-            <label className="text-sm font-medium" htmlFor="username">
+            <label className="text-sm font-medium" htmlFor={usernameId}>
               Username
             </label>
-            <Input id="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
-          </div>
-          <div className="space-y-1">
-            <label className="text-sm font-medium" htmlFor="password">
-              Password
-            </label>
             <Input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
+              id={usernameId}
+              name="username"
+              autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "login-error" : undefined}
+              disabled={submitting}
             />
           </div>
-          {error ? <div className="text-sm text-destructive">{error}</div> : null}
-          <Button type="submit" disabled={submitting} className="w-full">
-            {submitting ? "Signing in..." : "Sign In"}
+          <div className="space-y-1">
+            <label className="text-sm font-medium" htmlFor={passwordId}>
+              Password
+            </label>
+            <div className="relative">
+              <Input
+                id={passwordId}
+                name="password"
+                type={showPassword ? "text" : "password"}
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                aria-invalid={Boolean(error)}
+                aria-describedby={error ? "login-error" : undefined}
+                className="pr-10"
+                disabled={submitting}
+              />
+              <button
+                type="button"
+                className="absolute right-0 top-0 flex h-full w-10 items-center justify-center rounded-r-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => setShowPassword((v) => !v)}
+                tabIndex={-1}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+          {error ? (
+            <div id="login-error" className="text-sm text-destructive" role="alert">
+              {error}
+            </div>
+          ) : null}
+          <Button type="submit" disabled={submitting} className="w-full" aria-busy={submitting}>
+            {submitting ? "Signing in…" : "Sign in"}
           </Button>
         </form>
+        <p className="text-center text-sm text-muted-foreground">
+          <Link to="/" className="underline-offset-4 hover:underline">
+            Back to home
+          </Link>
+        </p>
+        {import.meta.env.DEV ? (
+          <p className="rounded-md border border-dashed bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">Local dev:</span> first startup may seed{" "}
+            <code className="rounded bg-muted px-1 py-0.5">admin</code> /{" "}
+            <code className="rounded bg-muted px-1 py-0.5">admin123456</code> unless{" "}
+            <code className="rounded bg-muted px-1 py-0.5">SEED_ADMIN_*</code> is set in{" "}
+            <code className="rounded bg-muted px-1 py-0.5">apps/backend/.env</code>.
+          </p>
+        ) : null}
       </div>
     </div>
   );
 }
-
