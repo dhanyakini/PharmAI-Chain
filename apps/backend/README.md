@@ -1,6 +1,8 @@
 # Sentinel — Backend
 
-FastAPI service for **Project Sentinel**: cold-chain simulation, **PostgreSQL** persistence, **Redis** pub/sub, **LangGraph** agents, and **Groq** LLM inference (OpenAI-compatible API).
+FastAPI service for **Project Sentinel**: cold-chain **simulation**, **PostgreSQL**, **Redis** pub/sub, **LangGraph** reroute workflow, and **optional Groq** LLM (OpenAI-compatible API). Reroutes are **suggestions only** until an operator confirms via the simulation API.
+
+**Monorepo:** [../../README.md](../../README.md) · **Frontend:** [../frontend/README.md](../frontend/README.md)
 
 ## What lives here
 
@@ -9,82 +11,91 @@ FastAPI service for **Project Sentinel**: cold-chain simulation, **PostgreSQL** 
 | HTTP API & WebSocket | `app/main.py`, `app/api/` |
 | Config & JWT | `app/core/` |
 | ORM models & DB session | `app/database/` |
-| Pydantic schemas | `app/schemas/` |
-| Simulation (thermal, route, weather) | `app/simulation/` |
-| Agents (LangGraph + prompts) | `app/agents/` |
-| Groq client (single HTTP boundary) | `app/services/groq_client.py` |
-| Redis + simulation worker | `app/services/` |
+| Pydantic schemas | `app/schemas/` (incl. `agent_schemas.py`) |
+| Simulation engine & thermal/weather/routing | `app/services/simulation_engine.py`, `thermal_model.py`, `routing_service.py`, `weather_service.py`, `warehouse_service.py` |
+| Agentic reroute (tools, graph, memory, logs) | `app/services/agent_*.py`, `agent_memory_service.py` |
+| Redis / lifecycle | `app/services/pubsub_service.py`, `lifecycle_service.py` |
+
+See **[docs/AGENTIC_REROUTE.md](../../docs/AGENTIC_REROUTE.md)** for the planner → critic → supervisor loop, tool allowlists, and admin observability endpoint `GET /shipments/{id}/agent-decisions`.
 
 ## Dependencies
 
-All Python dependencies are declared in **`requirements.txt`**. Install them **only inside a virtual environment** (project `.venv` or your own):
+Declared in **`requirements.txt`**. Use a virtual environment:
 
 ```bash
 cd apps/backend
 python -m venv .venv
-# Windows: .venv\Scripts\activate
-# macOS/Linux: source .venv/bin/activate
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Do not install packages globally; keep the environment isolated per project.
+From the **monorepo root** (shared `.venv`): `pip install -r requirements.txt` pulls in backend deps, including **`psycopg2-binary`** for **Alembic**.
 
 ## Configuration
 
-1. Copy `apps/backend/.env.example` to `apps/backend/.env`.
-2. Set **`GROQ_API_KEY`** (and optionally **`SECRET_KEY`**, database URLs). See [Groq quickstart](https://console.groq.com/docs/quickstart) for API keys.
-3. `.env` is gitignored; never commit secrets.
+1. Copy `.env.example` → `.env`.
+2. Required: **`SECRET_KEY`** (≥16 chars), **`DATABASE_URL`** (e.g. `postgresql+asyncpg://...`), **`REDIS_URL`**.
+3. **`GROQ_API_KEY`**: optional. Empty → deterministic reroute policy only; set for LLM planner/supervisor JSON path.
 
-**Groq usage:** The app calls Groq’s **OpenAI-compatible** endpoint `https://api.groq.com/openai/v1/chat/completions` with `Authorization: Bearer <GROQ_API_KEY>`, same as the official [`groq` Python SDK](https://console.groq.com/docs/quickstart) uses under the hood. We use **`httpx`** + JSON parsing in `app/services/groq_client.py` so agents stay async-friendly and structured outputs are validated with Pydantic.
+Never commit `.env`.
 
-## Demo login (first-time startup)
+## Default admin (local, first startup)
 
-If the **`users`** table is empty, the API seeds an **admin** account:
+If **`users`** is empty and `ENV=local` with `seed_admin_defaults_in_local` enabled (default), **`seed_admin_user()`** creates:
 
-| Field    | Value               |
-|----------|---------------------|
-| Username | `demo`              |
-| Password | `SentinelDemo2026!` |
-| Email    | `demo@sentinel.local` |
+| Field    | Default (local)   |
+|----------|-------------------|
+| Username | `admin`           |
+| Password | `admin123456`     |
+| Email    | `admin@example.com` |
 
-If you already created users, this seed is skipped—use your own credentials or reset the database.
+Override with **`SEED_ADMIN_USERNAME`**, **`SEED_ADMIN_EMAIL`**, **`SEED_ADMIN_PASSWORD`** in `.env` (see `app/core/config.py`), or register via `POST /auth/register`.
 
 ## Run (local)
 
-Requires **PostgreSQL** and **Redis** (e.g. Docker: `docker compose up -d postgres redis` from repo root).
+Postgres and Redis running (e.g. `docker compose up -d postgres redis` from repo root).
 
 ```bash
-# from apps/backend with venv activated
+cd apps/backend
+source .venv/bin/activate
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-- **Swagger / OpenAPI:** http://localhost:8000/docs  
+- **OpenAPI:** http://localhost:8000/docs  
 - **Health:** http://localhost:8000/health  
+
+## Alembic migrations
+
+```bash
+cd apps/backend
+alembic upgrade head
+```
+
+`alembic/env.py` merges **`apps/backend/.env`** into the environment and picks a sync Postgres driver (`psycopg2` or `psycopg`). For `postgresql+asyncpg://`, the `+asyncpg` suffix is stripped for migrations.
 
 ## Tests
 
 ```bash
-pytest
+cd apps/backend
+pytest tests/ -q
 ```
 
-Use `pytest.ini` and `tests/`; set env vars as in `tests/conftest.py` for SQLite-based unit tests.
+`pytest.ini` sets `asyncio_mode = auto`. `tests/conftest.py` uses SQLite + OSRM stubs; no Groq key required.
 
 ## Docker
 
-Image is built from this directory (`Dockerfile`). See the **repository root** `README.md` and `docker-compose.yml` for full-stack runs.
+`Dockerfile` in this directory. See repository root **README.md** and **docker-compose.yml** for full-stack runs.
 
 ## Troubleshooting
 
-### `ix_shipments_status` already exists / duplicate index
+### `ix_shipments_status` / duplicate index
 
-The ORM used to define the same index twice (`index=True` plus `Index(...)`). That is fixed in `models.py`. If a previous run left Postgres in a bad state, reset the DB volume: from repo root `docker compose down -v`, then `docker compose up -d postgres redis`, then start uvicorn again.
+If an old DB left duplicates, reset the volume: `docker compose down -v`, then bring Postgres back up.
 
-### `Connect call failed` / `Errno 10061` on port 5432
+### Postgres connection refused
 
-Nothing is listening on **PostgreSQL** (`localhost:5432`). Start Postgres (and Redis for full features) from the **repository root**:
+Start Postgres from repo root: `docker compose up -d postgres redis`, then match **`DATABASE_URL`** in `.env`.
 
-```bash
-docker compose up -d postgres redis
-```
+### `No module named 'psycopg2'` when running Alembic
 
-Wait until Postgres is healthy, then start uvicorn again. If you use a local Postgres install instead of Docker, create the `sentinel` database and ensure `DATABASE_URL` in `.env` matches your user, password, host, and port.
+Install sync driver: `pip install psycopg2-binary` (included in `requirements.txt`) or `pip install 'psycopg[binary]'`.
