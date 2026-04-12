@@ -1,6 +1,7 @@
 import * as React from "react";
 
 import { api } from "@/lib/api";
+import { kmToMiles } from "@/lib/units";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -92,7 +93,9 @@ export default function RerouteModal({
             <div className="text-muted-foreground">Confidence: {(suggestion.confidence_score * 100).toFixed(0)}%</div>
           ) : null}
           {typeof suggestion?.proposed_distance_km === "number" ? (
-            <div className="text-muted-foreground">Proposed distance: {suggestion.proposed_distance_km.toFixed(2)} km</div>
+            <div className="text-muted-foreground">
+              Proposed distance: {kmToMiles(suggestion.proposed_distance_km).toFixed(2)} mi
+            </div>
           ) : null}
           {typeof suggestion?.proposed_eta_minutes === "number" ? (
             <div className="text-muted-foreground">Proposed ETA: {suggestion.proposed_eta_minutes.toFixed(1)} min</div>

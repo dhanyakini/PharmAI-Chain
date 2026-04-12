@@ -1,6 +1,7 @@
 import * as React from "react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { kmhToMph, kmToMiles } from "@/lib/units";
 import type { ActivityEntry } from "@/stores/simulation-store";
 
 const FREEZING_THRESHOLD_F = 36.0;
@@ -16,6 +17,8 @@ function TempBadge({ value }: { value?: number }) {
 }
 
 export default function ActivityLogCard({ steps }: { steps: ActivityEntry[] }) {
+  const newestFirst = React.useMemo(() => [...steps].reverse(), [steps]);
+
   return (
     <Card>
       <CardHeader>
@@ -23,15 +26,21 @@ export default function ActivityLogCard({ steps }: { steps: ActivityEntry[] }) {
       </CardHeader>
       <CardContent className="text-sm">
         <div className="space-y-3 max-h-[520px] overflow-auto pr-1">
-          {steps.length === 0 ? (
+          {newestFirst.length === 0 ? (
             <div className="text-muted-foreground">No activity yet. Click Start to begin.</div>
           ) : (
-            steps.map((s, idx) => {
+            newestFirst.map((s, idx) => {
               const time = s.timestamp ? s.timestamp.slice(11, 19) : "";
               if (s.kind === "telemetry") {
                 const bad = typeof s.internal_temp === "number" && s.internal_temp <= FREEZING_THRESHOLD_F;
+                const pay = s.payload ?? {};
+                const segMi =
+                  typeof pay.segment_progress_km === "number" ? kmToMiles(pay.segment_progress_km) : null;
+                const remMi =
+                  typeof pay.remaining_distance_km === "number" ? kmToMiles(pay.remaining_distance_km) : null;
+                const totMi = typeof pay.route_total_km === "number" ? kmToMiles(pay.route_total_km) : null;
                 return (
-                  <div key={`telemetry-${s.timestamp ?? idx}-${idx}`} className="rounded-md border bg-card p-3">
+                  <div key={`telemetry-${s.timestamp ?? "t"}-${idx}`} className="rounded-md border bg-card p-3">
                     <div className="flex items-baseline justify-between gap-2">
                       <div className="font-medium">Telemetry tick</div>
                       <div className="text-xs text-muted-foreground">{time}</div>
@@ -69,7 +78,9 @@ export default function ActivityLogCard({ steps }: { steps: ActivityEntry[] }) {
                       </div>
                       <div>
                         <div className="text-xs text-muted-foreground">Speed</div>
-                        <div className="text-foreground">{typeof s.speed === "number" ? `${s.speed.toFixed(1)} km/h` : "—"}</div>
+                        <div className="text-foreground">
+                          {typeof s.speed === "number" ? `${kmhToMph(s.speed).toFixed(1)} mph` : "—"}
+                        </div>
                       </div>
                       <div>
                         <div className="text-xs text-muted-foreground">Heading</div>
@@ -78,9 +89,27 @@ export default function ActivityLogCard({ steps }: { steps: ActivityEntry[] }) {
                       <div>
                         <div className="text-xs text-muted-foreground">Progress</div>
                         <div className="text-foreground">
-                          {typeof (s.payload?.progress_pct) === "number" ? `${Number(s.payload.progress_pct).toFixed(1)}%` : "—"}
+                          {typeof pay.progress_pct === "number" ? `${Number(pay.progress_pct).toFixed(1)}%` : "—"}
                         </div>
                       </div>
+                      {segMi !== null ? (
+                        <div>
+                          <div className="text-xs text-muted-foreground">Segment progress</div>
+                          <div className="text-foreground">{segMi.toFixed(2)} mi</div>
+                        </div>
+                      ) : null}
+                      {remMi !== null ? (
+                        <div>
+                          <div className="text-xs text-muted-foreground">Remaining</div>
+                          <div className="text-foreground">{remMi.toFixed(2)} mi</div>
+                        </div>
+                      ) : null}
+                      {totMi !== null ? (
+                        <div>
+                          <div className="text-xs text-muted-foreground">Route total</div>
+                          <div className="text-foreground">{totMi.toFixed(2)} mi</div>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 );
@@ -99,7 +128,7 @@ export default function ActivityLogCard({ steps }: { steps: ActivityEntry[] }) {
                   : null;
 
               return (
-                <div key={`lifecycle-${s.timestamp ?? idx}-${idx}`} className="rounded-md border bg-card p-3">
+                <div key={`lifecycle-${s.timestamp ?? "l"}-${s.event_name}-${idx}`} className="rounded-md border bg-card p-3">
                   <div className="flex items-baseline justify-between gap-2">
                     <div className="font-medium">{s.event_name}</div>
                     <div className="text-xs text-muted-foreground">{time}</div>
