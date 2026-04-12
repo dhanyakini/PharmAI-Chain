@@ -2,6 +2,8 @@
 
 These diagrams use [Mermaid](https://mermaid.js.org/). They render on GitHub, in many IDEs, and in VS Code with a Mermaid preview extension.
 
+**Palette (consistent across all charts):** light backgrounds (**white** `#ffffff`, **cluster** `#e8eef4`, **subtle** `#f1f5f9`) with **dark slate text** `#0f172a` for maximum contrast. **Teal** `#0d9488` is used for accents and borders only—not for large text areas. Edge and message lines use **#334155**. PNG export uses the same tokens in [`mermaid-config.json`](./mermaid-config.json).
+
 **Export to PNG:** see [Exporting diagrams to PNG](#exporting-diagrams-to-png) at the bottom.
 
 ---
@@ -11,7 +13,7 @@ These diagrams use [Mermaid](https://mermaid.js.org/). They render on GitHub, in
 High-level data flow between major components.
 
 ```mermaid
-%%{init: {'theme':'base','themeVariables':{'primaryColor':'#0d9488','primaryTextColor':'#f0fdfa','primaryBorderColor':'#0f766e','secondaryColor':'#e2e8f0','secondaryTextColor':'#1e293b','tertiaryColor':'#f8fafc','lineColor':'#64748b','textColor':'#0f172a','clusterBkg':'#f1f5f9','clusterBorder':'#94a3b8','mainBkg':'#ffffff','fontFamily':'ui-sans-serif, system-ui, sans-serif','fontSize':'15px'},'flowchart':{'curve':'basis','padding':20,'nodeSpacing':56,'rankSpacing':64}}}%%
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, sans-serif','fontSize':'15px','primaryColor':'#ffffff','primaryTextColor':'#0f172a','primaryBorderColor':'#0d9488','secondaryColor':'#ffffff','secondaryTextColor':'#0f172a','secondaryBorderColor':'#64748b','tertiaryColor':'#f1f5f9','tertiaryTextColor':'#0f172a','tertiaryBorderColor':'#475569','lineColor':'#334155','textColor':'#0f172a','mainBkg':'#ffffff','nodeBorder':'#475569','clusterBkg':'#e8eef4','clusterBorder':'#64748b','edgeLabelBackground':'#ffffff','titleColor':'#0f172a'},'flowchart':{'curve':'basis','padding':20,'nodeSpacing':56,'rankSpacing':64,'useMaxWidth':true}}}%%
 flowchart LR
   subgraph clients[" 🖥 Client tier "]
     UI["React SPA · Vite<br/>Dashboard & simulation UI"]
@@ -53,7 +55,7 @@ flowchart LR
 From sign-in through protected API usage.
 
 ```mermaid
-%%{init: {'theme':'base','themeVariables':{'primaryColor':'#0d9488','actorBkg':'#ccfbf1','actorBorder':'#0d9488','actorTextColor':'#134e4a','noteBkgColor':'#fffbeb','noteTextColor':'#78350f','noteBorderColor':'#d97706','signalColor':'#334155','fontFamily':'ui-sans-serif, system-ui, sans-serif'},'sequence':{'actorFontSize':15,'messageFontSize':14,'boxMargin':10}}}%%
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, sans-serif','fontSize':'15px','actorBkg':'#e8eef4','actorBorder':'#0d9488','actorTextColor':'#0f172a','actorLineColor':'#0d9488','signalColor':'#334155','signalTextColor':'#0f172a','labelBoxBkgColor':'#e8eef4','labelBoxBorderColor':'#0d9488','labelTextColor':'#0f172a','loopTextColor':'#0f172a','noteBkgColor':'#fef3c7','noteTextColor':'#78350f','noteBorderColor':'#ca8a04','textColor':'#0f172a','lineColor':'#334155'},'sequence':{'actorFontSize':15,'messageFontSize':14,'boxMargin':10}}}%%
 sequenceDiagram
   autonumber
   participant U as User / Browser
@@ -79,11 +81,11 @@ sequenceDiagram
 ```
 
 ```mermaid
-%%{init: {'theme':'base','themeVariables':{'primaryColor':'#0d9488','primaryTextColor':'#f0fdfa','lineColor':'#64748b','clusterBkg':'#f1f5f9'},'flowchart':{'curve':'basis','padding':16}}}%%
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, sans-serif','fontSize':'15px','primaryColor':'#ffffff','primaryTextColor':'#0f172a','primaryBorderColor':'#0d9488','secondaryColor':'#ffffff','secondaryTextColor':'#0f172a','secondaryBorderColor':'#64748b','tertiaryColor':'#f1f5f9','tertiaryTextColor':'#0f172a','lineColor':'#334155','textColor':'#0f172a','clusterBkg':'#e8eef4','clusterBorder':'#64748b','edgeLabelBackground':'#ffffff','titleColor':'#0f172a'},'flowchart':{'curve':'basis','padding':16,'useMaxWidth':true}}}%%
 flowchart TD
-  classDef ok fill:#ecfdf5,stroke:#059669,stroke-width:2px,color:#064e3b
-  classDef err fill:#fef2f2,stroke:#dc2626,stroke-width:2px,color:#7f1d1d
-  classDef neutral fill:#f8fafc,stroke:#94a3b8,color:#0f172a
+  classDef ok fill:#dcfce7,stroke:#15803d,stroke-width:2px,color:#14532d
+  classDef err fill:#fee2e2,stroke:#b91c1c,stroke-width:2px,color:#7f1d1d
+  classDef neutral fill:#ffffff,stroke:#64748b,stroke-width:2px,color:#0f172a
 
   A[Open protected route] --> B{Token in storage?}
   B -->|No| C[Redirect /login]
@@ -105,7 +107,7 @@ flowchart TD
 Logical flow from operator action to background processing and live UI updates.
 
 ```mermaid
-%%{init: {'theme':'base','themeVariables':{'primaryColor':'#0d9488','lineColor':'#64748b','clusterBkg':'#f1f5f9'},'flowchart':{'curve':'basis','padding':18,'nodeSpacing':50,'rankSpacing':58}}}%%
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, sans-serif','fontSize':'15px','primaryColor':'#ffffff','primaryTextColor':'#0f172a','primaryBorderColor':'#0d9488','secondaryColor':'#ffffff','secondaryTextColor':'#0f172a','secondaryBorderColor':'#64748b','tertiaryColor':'#f1f5f9','tertiaryTextColor':'#0f172a','tertiaryBorderColor':'#475569','lineColor':'#334155','textColor':'#0f172a','mainBkg':'#ffffff','nodeBorder':'#475569','clusterBkg':'#e8eef4','clusterBorder':'#64748b','edgeLabelBackground':'#ffffff','titleColor':'#0f172a'},'flowchart':{'curve':'basis','padding':18,'nodeSpacing':50,'rankSpacing':58,'useMaxWidth':true}}}%%
 flowchart TD
   subgraph operator[" Operator "]
     O1[Optional blizzard scenario]
@@ -156,11 +158,12 @@ flowchart TD
 Two modes: **no Groq key** (deterministic graph) vs **Groq key set** (LLM planner + critic + supervisor). Both respect **human-in-the-loop** (no auto-apply).
 
 ```mermaid
-%%{init: {'theme':'base','themeVariables':{'primaryColor':'#0d9488','lineColor':'#64748b','clusterBkg':'#f1f5f9'},'flowchart':{'curve':'basis','padding':16}}}%%
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, sans-serif','fontSize':'15px','primaryColor':'#ffffff','primaryTextColor':'#0f172a','primaryBorderColor':'#0d9488','secondaryColor':'#ffffff','secondaryTextColor':'#0f172a','secondaryBorderColor':'#64748b','tertiaryColor':'#f1f5f9','tertiaryTextColor':'#0f172a','tertiaryBorderColor':'#475569','lineColor':'#334155','textColor':'#0f172a','mainBkg':'#ffffff','nodeBorder':'#475569','clusterBkg':'#e8eef4','clusterBorder':'#64748b','edgeLabelBackground':'#ffffff','titleColor':'#0f172a'},'flowchart':{'curve':'basis','padding':16,'useMaxWidth':true}}}%%
 flowchart TD
-  classDef gate fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f
-  classDef llm fill:#e0e7ff,stroke:#6366f1,stroke-width:2px,color:#312e81
-  classDef out fill:#ecfdf5,stroke:#059669,stroke-width:2px,color:#064e3b
+  classDef base fill:#ffffff,stroke:#475569,stroke-width:2px,color:#0f172a
+  classDef gate fill:#fef9c3,stroke:#ca8a04,stroke-width:2px,color:#713f12
+  classDef llm fill:#e0e7ff,stroke:#4338ca,stroke-width:2px,color:#1e1b4b
+  classDef out fill:#dcfce7,stroke:#15803d,stroke-width:2px,color:#14532d
 
   START([suggest_reroute]) --> PERC["Perception tools<br/>warehouses · legs · thermal · weather · memory"]
   PERC --> KEY{GROQ_API_KEY set?}
@@ -184,6 +187,7 @@ flowchart TD
   class KEY,OP gate
   class PLAN,SUP llm
   class OUT1,OUT2,APPLY,PERSIST,EVT out
+  class START,PERC,DET,EVAL,CRIT,MEM base
 ```
 
 ---
@@ -191,7 +195,7 @@ flowchart TD
 ## 5. Human-in-the-loop reroute (UI + API)
 
 ```mermaid
-%%{init: {'theme':'base','themeVariables':{'primaryColor':'#0d9488','actorBkg':'#ccfbf1','noteBkgColor':'#fffbeb','fontFamily':'ui-sans-serif, system-ui, sans-serif'},'sequence':{'actorFontSize':15,'messageFontSize':14}}}%%
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, sans-serif','fontSize':'15px','actorBkg':'#e8eef4','actorBorder':'#0d9488','actorTextColor':'#0f172a','actorLineColor':'#0d9488','signalColor':'#334155','signalTextColor':'#0f172a','labelBoxBkgColor':'#e8eef4','labelBoxBorderColor':'#0d9488','labelTextColor':'#0f172a','loopTextColor':'#0f172a','noteBkgColor':'#fef3c7','noteTextColor':'#78350f','noteBorderColor':'#ca8a04','textColor':'#0f172a','lineColor':'#334155'},'sequence':{'actorFontSize':15,'messageFontSize':14,'boxMargin':10}}}%%
 sequenceDiagram
   autonumber
   participant Op as Operator
@@ -222,11 +226,11 @@ sequenceDiagram
 How a shipment moves from creation to simulation-ready state.
 
 ```mermaid
-%%{init: {'theme':'base','themeVariables':{'primaryColor':'#0d9488','lineColor':'#64748b'},'flowchart':{'curve':'basis','padding':24}}}%%
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, sans-serif','fontSize':'15px','primaryColor':'#ffffff','primaryTextColor':'#0f172a','primaryBorderColor':'#0d9488','secondaryColor':'#ffffff','secondaryTextColor':'#0f172a','secondaryBorderColor':'#64748b','tertiaryColor':'#f1f5f9','tertiaryTextColor':'#0f172a','tertiaryBorderColor':'#475569','lineColor':'#334155','textColor':'#0f172a','mainBkg':'#ffffff','nodeBorder':'#475569','clusterBkg':'#e8eef4','clusterBorder':'#64748b','edgeLabelBackground':'#ffffff','titleColor':'#0f172a'},'flowchart':{'curve':'basis','padding':24,'useMaxWidth':true}}}%%
 flowchart LR
-  classDef api fill:#f0fdfa,stroke:#0d9488,stroke-width:2px,color:#134e4a
-  classDef data fill:#f1f5f9,stroke:#64748b,color:#0f172a
-  classDef ext fill:#fff7ed,stroke:#ea580c,color:#7c2d12
+  classDef api fill:#ffffff,stroke:#0d9488,stroke-width:2.5px,color:#0f172a
+  classDef data fill:#f1f5f9,stroke:#475569,stroke-width:2px,color:#0f172a
+  classDef ext fill:#fff7ed,stroke:#c2410c,stroke-width:2px,color:#7c2d12
 
   A["POST /shipments"] --> B[("Shipment row")]
   B --> C["OSRM default polyline"]
@@ -302,7 +306,7 @@ Example:
 MERMAID_WIDTH=3200 MERMAID_HEIGHT=2400 npm run diagrams:png
 ```
 
-Styling for CLI output is controlled by **`docs/mermaid-config.json`** (teal / slate palette aligned with the inline `%%{init: …}%%` blocks above).
+Styling for CLI output is controlled by **`docs/mermaid-config.json`**, using the same light fills, dark text (`#0f172a`), teal borders (`#0d9488`), and slate lines (`#334155`) as the inline `%%{init: …}%%` blocks above.
 
 ### Option B — one-off `npx` (no `docs/package.json` install)
 
