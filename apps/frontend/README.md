@@ -41,7 +41,7 @@ Only variables prefixed with **`VITE_`** are exposed to the browser. **Never** p
 
 ## Default login (local backend)
 
-Matches the backend’s **`seed_admin_user()`** defaults when `ENV=local` and the `users` table is empty:
+The sign-in page does not show these hints; use this section when running locally. Matches the backend’s **`seed_admin_user()`** defaults when `ENV=local` and the `users` table is empty:
 
 | Field    | Value               |
 |----------|---------------------|

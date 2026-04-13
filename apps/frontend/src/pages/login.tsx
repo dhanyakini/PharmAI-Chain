@@ -125,15 +125,6 @@ export default function LoginPage() {
             Back to home
           </Link>
         </p>
-        {import.meta.env.DEV ? (
-          <p className="rounded-md border border-dashed bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">Local dev:</span> first startup may seed{" "}
-            <code className="rounded bg-muted px-1 py-0.5">admin</code> /{" "}
-            <code className="rounded bg-muted px-1 py-0.5">admin123456</code> unless{" "}
-            <code className="rounded bg-muted px-1 py-0.5">SEED_ADMIN_*</code> is set in{" "}
-            <code className="rounded bg-muted px-1 py-0.5">apps/backend/.env</code>.
-          </p>
-        ) : null}
       </div>
     </div>
   );
