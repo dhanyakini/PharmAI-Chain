@@ -37,5 +37,8 @@ Thumbs.db
 # Logs
 *.log
 
+# Large media (GitHub rejects blobs > 100MB; keep recordings local or use Drive / LFS)
+*.mov
+
 # Alembic (keep versions; ignore local overrides if any)
 # apps/backend/alembic/versions/*.pyc

@@ -727,6 +727,29 @@ async def _simulation_loop(shipment_id: int) -> None:
                                 event_name="reroute_suggested",
                                 payload=runtime.pending_reroute,
                             )
+                            # Same supervised event as the agent pipeline path, so Audits /interventions
+                            # stays in sync when blizzard triggers the fast gate (pending_reroute is set
+                            # here, which prevents should_evaluate_reroute from running the full pipeline).
+                            await _persist_intervention_log(
+                                session=session,
+                                shipment_id=shipment_id,
+                                agent_role="supervisor_agent",
+                                trigger_reason="blizzard_detected",
+                                reasoning_trace=str(
+                                    runtime.pending_reroute.get("reasoning_trace")
+                                    or runtime.pending_reroute.get("decision_reason")
+                                    or ""
+                                ),
+                                action_taken="reroute_confirmation_requested",
+                                suggested_route_json={
+                                    "proposed_remaining_polyline": runtime.pending_reroute.get(
+                                        "proposed_remaining_polyline"
+                                    ),
+                                    "proposed_distance_km": runtime.pending_reroute.get("proposed_distance_km"),
+                                    "proposed_eta_minutes": runtime.pending_reroute.get("proposed_eta_minutes"),
+                                },
+                                raw_model_output_json=dict(runtime.pending_reroute),
+                            )
                     if not now_in_zone:
                         runtime.in_blizzard_zone = False
                         runtime.blizzard_prompted_in_current_zone = False
