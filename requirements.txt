@@ -1,2 +1,2 @@
-# Monorepo convenience: backend deps (includes psycopg2-binary for Alembic).
+# Include backend service dependencies so one root install works for the repo.
 -r apps/backend/requirements.txt

@@ -1,39 +1,53 @@
 Project Proposal - Multi-Agent Intelligence for Pharmaceutical Logistics
+
 1. Project Overview
-This an autonomous multi-agent system designed to manage disruptions in a pharmaceutical cold chain, with a
-focus on insulin transportation. Insulin is temperature-sensitive and must be kept between 35°F and 77°F. The
-goal of this project is to demonstrate how agentic AI can monitor real-time conditions, reason about risk, and
-autonomously take corrective actions without direct human intervention.
+Sentinel is a multi-agent cold-chain logistics simulator designed to manage disruptions in insulin transportation.
+Insulin is temperature-sensitive and must remain within safe ranges during transit. The goal is to show how agentic
+reasoning can detect risk early, evaluate reroute options, and provide operator-ready decisions in near real time.
+
 2. Problem Statement
-Traditional supply chain systems rely on static, rule-based logic and often fail during unexpected or compound
-disruptions. In high-stakes medical logistics, such failures can result in significant financial loss and risks to
-patient health. This project addresses the challenge of building a system that can adapt intelligently during
-extreme events.
+Traditional supply-chain workflows often rely on static rules and are brittle under compound disruptions (weather,
+traffic, and timing pressure). In pharmaceutical logistics, delayed intervention can lead to spoilage and patient risk.
+This project addresses the need for adaptive, explainable decision support in high-stakes transport conditions.
+
 3. Simulated Operational Scenario
-• Cargo: 5,000 units of insulin (approximate value: $1.5 million)
-• Route: Manufacturing facility in New Jersey to a distribution center in Boston
-• Disruption: Severe winter blizzard blocking major highways
-• Risk: Insulin freezing if exposed to sub-zero temperatures for more than four hours
-4. Technical Architecture & Methodology
-A multi-agent architecture using LangGraph for iterative reasoning and cyclic planning workflows.
-• Environment Agent: Monitors NOAA environmental feeds and predicts thermal exposure thresholds and
-“Point of No Return.”
-• Logic Agent: Integrates OpenStreetMap and Google APIs to calculate rerouting options, traffic latency, and
-temperature-controlled staging areas.
-• Supervisor Agent: Acts as the central orchestrator performing multi-objective optimization across safety,
-cost, and delivery time.
-The Inference Engine will be Llama 3 via Groq API, selected for high tokens-per-second throughput enabling
-near real-time reasoning within simulated logistics environments.
-The System Implementation includes FastAPI backend for agent orchestration and API services and React
-frontend dashboard for visualization and human-in-the-loop oversight.
-5. Data Source
-• Geospatial Data: OpenStreetMap for road topology; Google Distance Matrix API for real-time travel
-estimates
-• Environmental Data: NOAA historical winter storm datasets for realistic weather simulations
-• Cold-Chain Constraints: Pharmaceutical stability guidelines specifying acceptable temperature ranges
-• Infrastructure Data: Scraped datasets on cold-chain warehouses, storage capacities, and staging locations
-6. Expected Outcomes
-By the end of the project, The Sentinel will be able to autonomously detect a cold-chain disruption, evaluate
-multiple response strategies, and execute the optimal solution in real time. The final deliverable will include a live
-dashboard demonstrating agent reasoning, decision-making, and successful prevention of insulin spoilage under
-simulated crisis conditions.
+- Cargo: 5,000 units of insulin (approximate value: $1.5 million)
+- Route: New Jersey manufacturing region to Boston distribution region
+- Disruption: Severe blizzard conditions and route congestion
+- Risk: Internal cargo temperature approaching cold-chain safety threshold
+
+4. Implemented Architecture & Methodology
+Sentinel uses a FastAPI backend, React dashboard frontend, PostgreSQL for state, Redis for runtime coordination,
+and LangGraph for agent orchestration.
+
+The reroute pipeline is implemented as a constrained multi-agent workflow:
+- Environment analysis: estimates thermal exposure and urgency
+- Candidate staging discovery: finds nearby cold-storage warehouse options
+- Route evaluation: computes route legs and ETA/distance candidates
+- Supervisor decision: ranks options by safety, delivery impact, and feasibility
+
+Operational modes:
+- Deterministic mode (default): runs a rule-based LangGraph pipeline with no LLM dependency
+- LLM-assisted mode (optional): uses Groq (Llama-family model) for planner/supervisor reasoning when
+  `GROQ_API_KEY` is provided
+
+Safety and governance constraints:
+- Warehouse decisions are constrained to tool-returned allowlisted IDs
+- Route metrics come from backend tools (OSRM-based routing with fallback), not free-form generation
+- Recommendations are advisory only; no automatic reroute is applied without operator confirmation
+
+5. Data and Inputs
+- Geospatial/routing: OSRM route leg evaluation (with deterministic fallback behavior)
+- Environmental conditions: OpenWeather when configured, plus local fallback and seeded blizzard scenarios
+- Operational data: shipment telemetry, cold-storage candidates, and scenario records stored in PostgreSQL
+- Domain constraints: cold-chain thresholds and simulation parameters configured in backend settings
+
+6. Current Outcomes
+The current system can:
+- Detect elevated cold-chain risk during simulation runs
+- Generate explainable reroute recommendations with decision traces
+- Persist agent decisions and operator feedback for observability
+- Support human-in-the-loop confirmation/rejection of reroute actions via API and dashboard workflows
+
+The final demonstration includes live telemetry, agent recommendations, and intervention tracking under realistic
+simulated weather disruption scenarios.
