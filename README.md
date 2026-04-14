@@ -1,4 +1,4 @@
-# Project PharmAI-Chain (monorepo)
+# Project PharmAI-Chain
 
 Pharmaceutical **cold-chain logistics simulator**: **FastAPI** backend (PostgreSQL, Redis, LangGraph, optional Groq), **React + Vite + Tailwind** frontend.
 
