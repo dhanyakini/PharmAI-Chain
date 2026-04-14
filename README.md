@@ -1,4 +1,4 @@
-# Project Sentinel (monorepo)
+# Project PharmAI-Chain (monorepo)
 
 Pharmaceutical **cold-chain logistics simulator**: **FastAPI** backend (PostgreSQL, Redis, LangGraph, optional Groq), **React + Vite + Tailwind** frontend.
 
